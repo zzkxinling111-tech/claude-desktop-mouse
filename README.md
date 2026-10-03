@@ -170,10 +170,13 @@ Coordinate accuracy was measured separately: **20 random cursor moves, maximum d
 
 ## Honest limitations
 
+- **CLI output is still Chinese.** `README`, `SKILL.md`, `reference/`, and `config.json` are in English, but the command-line messages, error text, and audit log entries are not. Claude reads them fine and will translate for you in its own replies — but if you want to read the source or contribute, be aware. An English pass on the CLI strings is planned.
+- **The default speed profile trades realism for speed.** `mouse_speed: 10` and `typing_mode: auto` mean the cursor effectively teleports and long text appears in a single paste. Both are real automation signals. See §6 of `SKILL.md` — dial it back for sensitive sites.
 - **Querying Chrome's UIA tree enables its accessibility tree, which is itself a detectable fingerprint.** For highly sensitive sites, use screenshot-only mode (call `shot` without `observe`).
 - **The screenshot only shows what's on screen.** The window must be visible and focused; occluded regions capture whatever is on top. Unlike a headless browser, this cannot run in the background.
 - **The mouse is a single shared resource.** While the skill works, you cannot use your computer. This is the fundamental cost of the approach.
 - **Mouse trajectories will not defeat professional bot mitigation on their own.** See the insight section above.
+- **Windows only.** It is built on `SendInput`, `UIAutomationCore`, and Win32 window APIs. There is no macOS or Linux port, and there isn't an obvious one.
 - **Automating a site may violate its Terms of Service.** That risk is yours. Don't experiment with a primary account.
 
 ## Architecture
