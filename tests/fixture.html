@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>desktop-mouse 测试页</title>
+<style>
+  body { font-family: system-ui, "Segoe UI", sans-serif; margin: 40px auto;
+         max-width: 780px; font-size: 16px; color: #111; background: #fff; }
+  h1 { font-size: 26px; } h2 { font-size: 19px; margin-top: 34px; color: #344; }
+  button { padding: 11px 20px; margin: 6px 8px 6px 0; font-size: 15px;
+           border: 1px solid #889; border-radius: 6px; background: #f6f7fa;
+           cursor: pointer; }
+  button:hover { background: #e8ebf2; }
+  input { padding: 9px 11px; margin: 6px 8px 6px 0; font-size: 15px;
+          width: 320px; border: 1px solid #99a; border-radius: 6px; }
+  #status { background: #eef3ff; border-left: 5px solid #4a6cf7; padding: 16px;
+            margin-top: 26px; font-size: 15px; white-space: pre-wrap;
+            min-height: 54px; }
+  .tall { height: 1500px;
+          background: linear-gradient(#fff, #dfe6f5); margin-top: 30px; }
+  #bottom { padding: 20px 0 60px; }
+</style>
+</head>
+<body>
+
+<h1>desktop-mouse 测试页</h1>
+<p>这个页面用来验证：真实鼠标点击、键盘输入、滚轮滚动是否真的作用到网页上。</p>
+
+<h2>一、普通点击</h2>
+<button id="btn-normal" onclick="log('普通按钮被点击')">普通按钮</button>
+
+<h2>二、审批门</h2>
+<p>下面两个按钮的名字命中了危险词表。如果它们被点到了，说明安全层失效。</p>
+<button id="btn-del" onclick="log('!!! 删除按钮被点击 —— 审批门失效 !!!')">删除全部内容</button>
+<button id="btn-pay" onclick="log('!!! 支付按钮被点击 —— 审批门失效 !!!')">立即支付</button>
+
+<h2>三、键盘输入</h2>
+<input id="text1" placeholder="普通输入框" oninput="note('普通框内容: ' + this.value)">
+<input id="pass1" type="password" placeholder="密码框（输入应被拒绝）"
+       oninput="log('!!! 密码框被输入了 —— 拦截失效 !!!')">
+
+<div id="status">状态：等待操作…</div>
+
+<div class="tall"></div>
+<h2 id="bottom">页面底部的锚点</h2>
+<p>如果你能看到这行字，说明滚动生效了。</p>
+
+<script>
+  const events = [];
+  function render() {
+    document.getElementById('status').textContent =
+      '状态：' + (events.length ? events.join(' ｜ ') : '等待操作…');
+  }
+  function log(message) { events.push(message); render(); }
+  function note(message) { log(message); }
+</script>
+
+</body>
+</html>
