@@ -14,6 +14,7 @@ Do not touch the keyboard or mouse while it runs — you will fight it for the c
 from __future__ import annotations
 
 import contextlib
+import os
 import io
 import json
 import sys
@@ -22,6 +23,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
+
+# This suite is written in English, so pin the interface language regardless of
+# what the developer's system or config.json says.
+os.environ["CLAUDE_MOUSE_LANG"] = "en"
 
 import ctl  # noqa: E402
 import guard  # noqa: E402

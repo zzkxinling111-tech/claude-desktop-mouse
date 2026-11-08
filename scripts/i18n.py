@@ -232,4 +232,36 @@ EN: dict[str, str] = {
     "已出现: [{t}] {name} 中心{center}": "Appeared: [{t}] {name} at {center}",
     "已切到前台: {title}": "Brought to front: {title}",
     " ←前台": " ←foreground",
+
+    # —— 自检 ——
+    "  DPI 模式    : {v}": "  DPI mode     : {v}",
+    "  虚拟屏幕    : 原点 ({vx},{vy})  尺寸 {vw}×{vh}":
+        "  Virtual screen: origin ({vx},{vy})  size {vw}×{vh}",
+    "  双击阈值    : {v} ms": "  Double-click : {v} ms",
+    "  当前光标    : {v}": "  Cursor       : {v}",
+    "  自身已提权  : {v}": "  Elevated     : {v}",
+    "  20 次随机移动：最大偏差 {w} px，平均偏差 {a:.2f} px":
+        "  20 random moves: max error {w} px, mean error {a:.2f} px",
+    "  ✓ 全部通过": "  ✓ all checks passed",
+    "  已允许占用  : {v}": "  Armed        : {v}",
+    "  急停标志    : {v}": "  Stop flag    : {v}",
+    "  用户空闲    : {v:.2f} s": "  User idle    : {v:.2f} s",
+    "  (没有找到浏览器窗口 —— 请打开 Chrome 或 Edge 后重跑)":
+        "  (no browser window found — open Chrome or Edge and run again)",
+    "  UIA 采集：{n} 个节点（{named} 个有名字），耗时 {dt:.3f}s":
+        "  UIA: {n} nodes ({named} named) in {dt:.3f}s",
+    "  地址栏读出  : {v}": "  Address bar  : {v}",
+    "  observe.py 尚未就绪，跳过。": "  observe.py not ready, skipped.",
+    "  {mark} 危险词判定 `{probe}` -> {tier}（应为 {expect}）":
+        "  {mark} danger word `{probe}` -> {tier} (expected {expect})",
+    "  ✓ 审批接口只认确认码（参数：{p}）":
+        "  ✓ approval accepts nothing but a consent code (params: {p})",
+    "  ✓ 危险操作确认没有关闭开关": "  ✓ dangerous actions cannot be switched off",
+    "  guard.py 尚未就绪，跳过。": "  guard.py not ready, skipped.",
+    "1. 坐标空间": "1. Coordinate space",
+    "2. 坐标精度（不涉及 UIA，纯 SendInput 往返）":
+        "2. Coordinate precision (SendInput round-trip, no UIA)",
+    "3. 浏览器窗口与 UIA": "3. Browser window and UIA",
+    "4. 安全层": "4. Safety layer",
+    "结论": "Result",
 }

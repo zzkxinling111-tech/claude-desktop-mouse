@@ -298,6 +298,21 @@ Common options: `--window <handle>` to target a window, `--json` for structured 
 
 ---
 
+## 5.5 Interface language
+
+Every message the CLI prints — including error text and the approval dialog — follows the
+Windows UI language by default. Two ways to override it:
+
+- `config.json` → `"language": "zh"` / `"en"` / `"auto"` (persistent)
+- `CLAUDE_MOUSE_LANG=zh|en` in front of a single command (temporary)
+
+Chinese is the primary language: the source text is written in Chinese, and English is a
+lookup table in `scripts/i18n.py`. A string with no English entry falls back to Chinese
+rather than raising or printing a key, so a missing translation never breaks a run.
+
+The test page (`tests/fixture.html`) and the e2e suite are English on purpose — they are
+the public samples. `run_e2e.py` pins `CLAUDE_MOUSE_LANG=en` so its assertions stay stable.
+
 ## 6. Speed settings (the `speed` block in `config.json`)
 
 The skill currently ships on a **fast** profile — speed bought at the cost of realism. Know
