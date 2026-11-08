@@ -296,12 +296,15 @@ def cmd_status(args) -> int:
         "danger_word_count": len(cfg["approval"]["danger_words"]),
     }
     lines = [
-        f"占用鼠标   : {'允许' if data['armed'] else '已禁止'}",
-        f"急停标志   : {'已触发（需 arm 才能恢复）' if data['stop_flag'] else '无'}",
-        f"浏览器窗口 : {data['browser_windows']} 个",
-        f"用户空闲   : {data['user_idle_seconds']} 秒",
-        f"热键       : 切换占用 {cfg['hotkeys']['toggle']} ／ 急停 {cfg['hotkeys']['panic']}",
-        f"危险操作   : 一律弹窗询问（{data['danger_word_count']} 个关键词，无法关闭）",
+        tr("占用鼠标   : {v}", v=tr("允许") if data["armed"] else tr("已禁止")),
+        tr("急停标志   : {v}",
+           v=tr("已触发（需 arm 才能恢复）") if data["stop_flag"] else tr("无")),
+        tr("浏览器窗口 : {n} 个", n=data["browser_windows"]),
+        tr("用户空闲   : {n} 秒", n=data["user_idle_seconds"]),
+        tr("热键       : 切换占用 {t} ／ 急停 {p}",
+           t=cfg["hotkeys"]["toggle"], p=cfg["hotkeys"]["panic"]),
+        tr("危险操作   : 一律弹窗询问（{n} 个关键词，无法关闭）",
+           n=data["danger_word_count"]),
     ]
     emit(data, "\n".join(lines))
     return EXIT_OK
@@ -315,7 +318,7 @@ def cmd_windows(args) -> int:
         return EXIT_OK
     lines = []
     for w in wins:
-        mark = " ←前台" if w["foreground"] else ""
+        mark = tr(" ←前台") if w["foreground"] else ""
         lines.append(f"hwnd={w['hwnd']:<10} {w['process']:<10} {w['title'][:60]}{mark}")
     emit(data, "\n".join(lines))
     return EXIT_OK
@@ -663,7 +666,8 @@ def cmd_drag(args) -> int:
         "from_element": (start or {}).get("name"), "to_element": (end or {}).get("name"),
     }
     return finish("drag", info, url, payload,
-                  f"拖拽 ({args.x1},{args.y1}) → ({args.x2},{args.y2})",
+                  tr("拖拽 ({x1},{y1}) → ({x2},{y2})",
+                     x1=args.x1, y1=args.y1, x2=args.x2, y2=args.y2),
                   xy=(args.x2, args.y2))
 
 
@@ -776,9 +780,10 @@ def cmd_drag_to(args) -> int:
     }
     return finish(
         "drag_to", info, url, payload,
-        f"已把 [{src['type']}] {src['name'][:40]!r} 拖到 "
-        f"[{dst['type'] if dst else '点'}] {dst_name[:40]!r}，"
-        f"落点 {tuple(result['to'])}（伺服 {result['steps']} 步）",
+        tr("已把 [{t1}] {n1} 拖到 [{t2}] {n2}，落点 {xy}（伺服 {steps} 步）",
+           t1=src["type"], n1=repr(src["name"][:40]),
+           t2=dst["type"] if dst else tr("点"), n2=repr(dst_name[:40]),
+           xy=tuple(result["to"]), steps=result["steps"]),
         element=src["name"], xy=tuple(result["to"]),
     )
 
@@ -806,7 +811,8 @@ def cmd_scroll(args) -> int:
 
     payload = {"action": "scroll", "url": url, "dy": args.dy, "dx": args.dx, "at": [ax, ay]}
     return finish("scroll", info, url, payload,
-                  f"滚动 dy={args.dy} dx={args.dx}（光标位于 ({ax},{ay})）",
+                  tr("滚动 dy={dy} dx={dx}（光标位于 ({x},{y})）",
+                     dy=args.dy, dx=args.dx, x=ax, y=ay),
                   xy=(ax, ay))
 
 
@@ -902,7 +908,7 @@ def cmd_type(args) -> int:
     else:
         humanize.type_text(text, wpm=wpm)
 
-    how = "粘贴" if use_paste else f"逐字符（{wpm:.0f} WPM，预计 {expected:.0f}s）"
+    how = tr("粘贴") if use_paste else tr("逐字符（{wpm:.0f} WPM，预计 {sec:.0f}s）", wpm=wpm, sec=expected)
     warn = "　注意：剪贴板里原有的非文本内容已被覆盖，无法还原。" if lost_clipboard else ""
 
     payload = {
@@ -917,9 +923,11 @@ def cmd_type(args) -> int:
         "focused_type": (focused or {}).get("type"),
     }
     return finish("type", info, url, payload,
-                  f"已{how}输入 {len(text)} 个字符到 [{(focused or {}).get('type', '未知')}] "
-                  f"{(focused or {}).get('name', '')[:40]!r}"
-                  f"（内容不记入日志）{warn}",
+                  tr("已{how}输入 {n} 个字符到 [{t}] {name}（内容不记入日志）{warn}",
+                     how=how, n=len(text),
+                     t=(focused or {}).get("type", tr("未知")),
+                     name=repr((focused or {}).get("name", "")[:40]),
+                     warn=warn),
                   chars=len(text))
 
 
@@ -928,7 +936,7 @@ def cmd_press(args) -> int:
     win, info, url = prepare_action(args, require_armed=True)
     humanize.press(args.combo)
     payload = {"action": "press", "url": url, "combo": args.combo}
-    return finish("press", info, url, payload, f"已发送按键 {args.combo}")
+    return finish("press", info, url, payload, tr("已发送按键 {combo}", combo=args.combo))
 
 
 def cmd_wait_for(args) -> int:
@@ -951,7 +959,8 @@ def cmd_wait_for(args) -> int:
                            "element": observe.public_view(h)}
                 return finish("wait_for", {"hwnd": win["hwnd"], "title": win["title"]},
                               None, payload,
-                              f"已出现: [{h['type']}] {h['name'][:50]!r} 中心{h['center']}",
+                              tr("已出现: [{t}] {name} 中心{center}",
+                                 t=h["type"], name=repr(h["name"][:50]), center=h["center"]),
                               element=h["name"])
             time.sleep(0.4)
             winput.check_geometry()
@@ -971,7 +980,7 @@ def cmd_focus(args) -> int:
     payload = {"focused": ok, "window": win}
     if not ok:
         return fail("切换失败。请手动点一下浏览器窗口再重试。")
-    return finish("focus", info, None, payload, f"已切到前台: {win['title'][:60]}")
+    return finish("focus", info, None, payload, tr("已切到前台: {title}", title=win["title"][:60]))
 
 
 # --------------------------------------------------------------------------

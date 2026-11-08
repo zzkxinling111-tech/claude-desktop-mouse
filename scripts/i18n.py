@@ -201,4 +201,35 @@ EN: dict[str, str] = {
     "抓屏失败。": "Screen capture failed.",
     "两帧的网格尺寸不一致，不能比较。":
         "The two frames have different grid sizes and cannot be compared.",
+
+    # —— status ——
+    "占用鼠标   : {v}": "Mouse control : {v}",
+    "允许": "allowed",
+    "已禁止": "disabled",
+    "急停标志   : {v}": "Stop flag     : {v}",
+    "已触发（需 arm 才能恢复）": "triggered (needs arm to clear)",
+    "无": "none",
+    "浏览器窗口 : {n} 个": "Browser windows: {n}",
+    "用户空闲   : {n} 秒": "User idle      : {n}s",
+    "热键       : 切换占用 {t} ／ 急停 {p}": "Hotkeys        : toggle {t} / panic {p}",
+    "危险操作   : 一律弹窗询问（{n} 个关键词，无法关闭）":
+        "Dangerous ops  : always ask, via dialog ({n} keywords, cannot be disabled)",
+
+    # —— 动作结果 ——
+    "拖拽 ({x1},{y1}) → ({x2},{y2})": "Drag ({x1},{y1}) → ({x2},{y2})",
+    "已把 [{t1}] {n1} 拖到 [{t2}] {n2}，落点 {xy}（伺服 {steps} 步）":
+        "Dragged [{t1}] {n1} onto [{t2}] {n2}, landed at {xy} ({steps} steps)",
+    "点": "point",
+    "滚动 dy={dy} dx={dx}（光标位于 ({x},{y})）":
+        "Scrolled dy={dy} dx={dx} (cursor at {x},{y})",
+    "粘贴": "paste",
+    "逐字符（{wpm:.0f} WPM，预计 {sec:.0f}s）":
+        "keystroke ({wpm:.0f} WPM, about {sec:.0f}s)",
+    "已{how}输入 {n} 个字符到 [{t}] {name}（内容不记入日志）{warn}":
+        "Typed {n} characters into [{t}] {name} via {how} (content not logged){warn}",
+    "未知": "unknown",
+    "已发送按键 {combo}": "Sent keys {combo}",
+    "已出现: [{t}] {name} 中心{center}": "Appeared: [{t}] {name} at {center}",
+    "已切到前台: {title}": "Brought to front: {title}",
+    " ←前台": " ←foreground",
 }
