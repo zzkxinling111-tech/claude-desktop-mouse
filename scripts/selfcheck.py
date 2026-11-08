@@ -95,14 +95,21 @@ def main() -> int:
         print(tr("  已允许占用  : {v}", v=guard.is_armed()))
         print(tr("  急停标志    : {v}", v=guard.stop_requested()))
         print(tr("  用户空闲    : {v:.2f} s", v=winput.user_idle_seconds()))
-        for probe, expect in (("登录", "ok"), ("it", "ok"),
-                              ("删除", "ask"), ("立即支付", "ask"),
-                              ("Delete repository", "ask")):
-            tier = guard.check_approval(probe)["tier"]
-            mark = "✓" if tier == expect else "✗"
-            print(tr("  {mark} 危险词判定 `{probe}` -> {tier}（应为 {expect}）", mark=mark, probe=probe, tier=tier, expect=expect))
-            if tier != expect:
-                problems.append(f"审批门异常：`{probe}` 判定为 {tier}，应为 {expect}。")
+
+        mode = str(guard.load_config()["approval"].get("mode", "ask")).lower()
+        print(tr("  审批门模式  : {v}", v=mode))
+        if mode == "off":
+            # 用户把确认码关了，这里没有任何拦截可验证 —— 跳过，不算失败。
+            print(tr("  - 审批门已关闭，跳过危险词与确认码检查"))
+        else:
+            for probe, expect in (("登录", "ok"), ("it", "ok"),
+                                  ("删除", "ask"), ("立即支付", "ask"),
+                                  ("Delete repository", "ask")):
+                tier = guard.check_approval(probe)["tier"]
+                mark = "✓" if tier == expect else "✗"
+                print(tr("  {mark} 危险词判定 `{probe}` -> {tier}（应为 {expect}）", mark=mark, probe=probe, tier=tier, expect=expect))
+                if tier != expect:
+                    problems.append(f"审批门异常：`{probe}` 判定为 {tier}，应为 {expect}。")
 
         # 授权必须是"确认码说了算"。只靠模型自己加参数不能放行。
         # 这里只做结构检查，不真的弹窗 —— 自检不该打断用户。
@@ -122,7 +129,11 @@ def main() -> int:
                 "配置里仍有可以放宽危险操作确认的开关 —— 那个开关不该存在。"
             )
         else:
-            print(tr("  ✓ 危险操作确认没有关闭开关"))
+            mode_val = str(approval_cfg.get("mode", "ask")).lower()
+            if mode_val not in ("off", "ask"):
+                problems.append(f"approval.mode 不是合法值：{mode_val}")
+            else:
+                print(tr("  ✓ 审批门模式合法：{v}", v=mode_val))
     except ImportError:
         print(tr("  guard.py 尚未就绪，跳过。"))
 

@@ -168,9 +168,26 @@ def list_browser_windows() -> list[dict]:
 def pick_window(hwnd: int | None = None) -> dict:
     """决定要操作哪个窗口。
 
-    优先级：显式指定 > 当前前台浏览器 > z 序最靠前的浏览器窗口
+    指定 hwnd 时不再限制必须是浏览器 —— window_scope 放开后，文件对话框、
+    资源管理器、任何桌面程序都能作为目标。不指定时仍优先挑浏览器窗口。
     """
     import guard
+
+    if hwnd:
+        h = int(hwnd)
+        if not winput.is_window(h) or not win32gui.IsWindowVisible(h):
+            raise guard.GuardError(i18n.tr("目标窗口不存在或已关闭。"))
+        left, top, right, bottom = win32gui.GetWindowRect(h)
+        pid = winput.window_pid(h)
+        return {
+            "hwnd": h,
+            "title": winput.window_title(h),
+            "class": winput.window_class(h),
+            "process": winput.process_name(pid),
+            "pid": pid,
+            "rect": (left, top, right, bottom),
+            "foreground": int(win32gui.GetForegroundWindow()) == h,
+        }
 
     windows = list_browser_windows()
     if not windows:
@@ -178,12 +195,6 @@ def pick_window(hwnd: int | None = None) -> dict:
             "没有找到可用的浏览器窗口。请先打开 Chrome 或 Edge，"
             "并确认窗口没有最小化。"
         )
-
-    if hwnd:
-        for w in windows:
-            if w["hwnd"] == int(hwnd):
-                return w
-        raise guard.GuardError(i18n.tr("hwnd={hwnd} 不是一个可见的浏览器窗口。", hwnd=hwnd))
 
     for w in windows:
         if w["foreground"]:

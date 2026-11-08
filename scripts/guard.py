@@ -242,20 +242,47 @@ def assert_user_idle(force: bool = False) -> None:
 
 
 def assert_window_allowed(hwnd: int) -> dict:
-    """确认目标窗口在白名单内，返回它的身份信息。"""
+    """确认目标窗口可以操作，返回它的身份信息。
+
+    `window_scope` 决定允许范围：
+      "all"      —— 任何窗口都能操作（文件对话框、资源管理器、任意桌面程序）
+      "browsers" —— 只允许白名单里的浏览器进程和窗口类
+
+    无论哪种范围，提权进程都会拒绝：UIPI 让普通进程无法向管理员窗口注入输入，
+    与其让它静默失败，不如提前报错。
+    """
     if not hwnd or not winput.is_window(hwnd):
         raise GuardError(i18n.tr("目标窗口不存在或已关闭。"))
 
     cfg = load_config()["whitelist"]
+    scope = str(cfg.get("window_scope", "browsers")).strip().lower()
 
     cls = winput.window_class(hwnd)
-    if cls not in cfg["window_classes"]:
-        raise GuardError(
-            f"拒绝操作：窗口类 `{cls}` 不在白名单内。本 skill 只允许操作浏览器窗口。"
-        )
-
     pid = winput.window_pid(hwnd)
     proc = winput.process_name(pid)
+    identity = {
+        "hwnd": int(hwnd),
+        "class": cls,
+        "pid": pid,
+        "process": proc,
+        "title": winput.window_title(hwnd),
+    }
+
+    if winput.is_elevated(pid) is True:
+        raise GuardError(
+            f"拒绝操作：`{proc}` 以管理员权限运行，普通进程无法向它注入输入。"
+            "请用普通权限重新打开这个程序。"
+        )
+
+    if scope == "all":
+        # 全放开。进程和标题仍然写进审计日志，方便事后回溯操作过哪些程序。
+        return identity
+
+    if cls not in cfg["window_classes"]:
+        raise GuardError(
+            f"拒绝操作：窗口类 `{cls}` 不在白名单内。"
+            "若要操作任意程序，把 config.json 的 whitelist.window_scope 设为 \"all\"。"
+        )
 
     # 永久禁止名单先查。它和下面的浏览器白名单是两条独立的判断：
     # 白名单决定"允许谁"，禁止名单保证"哪怕白名单配错了也碰不了这几个"。
@@ -271,19 +298,7 @@ def assert_window_allowed(hwnd: int) -> dict:
             f"（允许：{'、'.join(cfg['browser_processes'])}）。"
         )
 
-    if winput.is_elevated(pid) is True:
-        raise GuardError(
-            "拒绝操作：该浏览器以管理员权限运行，普通进程无法向其注入输入。"
-            "请用普通权限重新打开浏览器。"
-        )
-
-    return {
-        "hwnd": int(hwnd),
-        "class": cls,
-        "pid": pid,
-        "process": proc,
-        "title": winput.window_title(hwnd),
-    }
+    return identity
 
 
 def assert_focused(hwnd: int) -> None:
@@ -343,11 +358,18 @@ def check_approval(element_name: str | None) -> dict:
     """判定这个操作要不要问用户。
 
     返回 {"tier": "ok" | "ask", "word": 命中的词 或 None}
+
+    approval.mode：
+      "off"  —— 不拦截任何操作，直接放行
+      "ask"  —— 命中 danger_words 就弹确认框（默认）
     """
     if not element_name:
         return {"tier": "ok", "word": None}
 
     cfg = load_config()["approval"]
+    if str(cfg.get("mode", "ask")).strip().lower() == "off":
+        return {"tier": "ok", "word": None}
+
     name = element_name.strip()
     if not name:
         return {"tier": "ok", "word": None}
