@@ -1,4 +1,4 @@
-"""打开测试页（仅本地 HTML 文件）。"""
+"""Open the test page (local HTML file only)."""
 import os
 import subprocess
 
@@ -15,9 +15,9 @@ candidates = [
 
 for exe in candidates:
     if os.path.exists(exe):
-        print("使用", exe)
-        # 单独开一个窗口，不要占用用户正在用的标签页
+        print("using", exe)
+        # Open a separate window so the user's current tab is left alone
         subprocess.Popen([exe, "--new-window", url])
         break
 else:
-    print("没找到 Chrome/Edge")
+    print("Chrome/Edge not found")

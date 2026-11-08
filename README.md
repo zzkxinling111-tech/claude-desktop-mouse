@@ -11,6 +11,10 @@ English · [简体中文](README.zh-CN.md)
 
 ---
 
+![Claude driving a real browser: clicking, dragging a word into a slot, and getting stopped by the approval gate](docs/demo.gif)
+
+*Recorded with the skill itself on `tests/fixture.html`: a plain click, two drags into slots, then a dangerous button that gets stopped by the approval gate instead of being clicked. The red ring is the cursor — Windows composites the real cursor outside the captured bitmap, so it is drawn on afterwards.*
+
 ## The problem
 
 You ask an agent to read something on the web and it comes back empty-handed. The page needs a login. Or it's behind Cloudflare. Playwright and Selenium get fingerprinted in milliseconds. `WebFetch` sees nothing but a challenge page.

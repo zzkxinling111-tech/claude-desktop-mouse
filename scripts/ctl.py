@@ -1201,26 +1201,26 @@ def cmd_batch(args) -> int:
         "failed_at": failed_at, "results": results,
     }
 
-    lines = [f"批量执行：共 {len(steps)} 步"]
+    lines = [f"Batch: {len(steps)} steps"]
     for r in results:
-        mark = "ok  " if r["ok"] else "失败"
+        mark = "ok  " if r["ok"] else "FAIL"
         lines.append(f"  {r['step']}. {r.get('label') or r['action']:<28} {mark}")
 
     if failed_at is None:
-        lines.append(f"全部 {done} 步成功。")
+        lines.append(f"All {done} steps succeeded.")
     else:
         lines.append("")
-        lines.append(f"停在第 {failed_at} 步：")
-        detail = results[-1]["detail"] or "（没有更多信息）"
+        lines.append(f"Stopped at step {failed_at}:")
+        detail = results[-1]["detail"] or "(no further detail)"
         lines.extend("  " + ln for ln in detail.strip().splitlines())
         lines.append("")
         if exit_code == EXIT_NEEDS_CONSENT:
             lines.append(
-                "这一步需要你本人确认：对话框里的 4 位码告诉助手后，"
-                "带上 --consent-code 单独重跑这一步即可。"
+                "This step needs the user: read the 4-digit code from the dialog, "
+                "then re-run this step alone with --consent-code."
             )
         else:
-            lines.append("后面的步骤没有执行。修正这一步后重新提交整批即可。")
+            lines.append("Later steps were skipped. Fix this one and re-submit the batch.")
 
     emit(payload, "\n".join(lines))
     return exit_code

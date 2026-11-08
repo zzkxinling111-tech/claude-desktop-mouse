@@ -382,15 +382,15 @@ def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
     MB_SETFOREGROUND = 0x00010000
 
     message = (
-        f"AI 助手请求执行一个有副作用的操作：\n\n"
-        f"        {(element_name or '(未命名元素)')[:80]}\n\n"
-        f"如果你同意，请把这个确认码告诉它：\n\n"
+        f"The AI assistant is asking to perform an action with side effects:\n\n"
+        f"        {(element_name or '(unnamed element)')[:80]}\n\n"
+        f"If you approve, tell it this code:\n\n"
         f"        {code}\n\n"
-        f"如果你没有要求过这个操作，请点「取消」。\n"
-        f"（确认码 {ttl_seconds} 秒内有效，只能用一次）"
+        f"If you did not ask for this, click Cancel.\n"
+        f"(the code is valid for {ttl_seconds} seconds and can be used once)"
     )
     result = winput.user32.MessageBoxW(
-        None, message, "desktop-mouse 操作确认",
+        None, message, "desktop-mouse — confirm action",
         MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND,
     )
     if result != 1:  # IDOK
