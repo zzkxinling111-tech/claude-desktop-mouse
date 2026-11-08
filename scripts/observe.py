@@ -19,6 +19,7 @@ import win32con
 import win32gui
 
 import humanize
+import i18n
 import winput
 
 # --------------------------------------------------------------------------
@@ -182,7 +183,7 @@ def pick_window(hwnd: int | None = None) -> dict:
         for w in windows:
             if w["hwnd"] == int(hwnd):
                 return w
-        raise guard.GuardError(f"hwnd={hwnd} 不是一个可见的浏览器窗口。")
+        raise guard.GuardError(i18n.tr("hwnd={hwnd} 不是一个可见的浏览器窗口。", hwnd=hwnd))
 
     for w in windows:
         if w["foreground"]:

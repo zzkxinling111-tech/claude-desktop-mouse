@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import i18n
 import winput
 
 BASE = Path(__file__).resolve().parent.parent
@@ -50,7 +51,7 @@ def load_config() -> dict:
     try:
         mtime = CONFIG_PATH.stat().st_mtime_ns
     except FileNotFoundError:
-        raise GuardError(f"配置文件不存在：{CONFIG_PATH}")
+        raise GuardError(i18n.tr("配置文件不存在：{path}", path=CONFIG_PATH))
 
     if _config_cache["mtime"] != mtime:
         with CONFIG_PATH.open(encoding="utf-8") as fh:
@@ -216,7 +217,7 @@ def assert_armed() -> None:
             "已急停或被禁止占用鼠标。请按 Ctrl+Alt+Space 恢复，或运行 `ctl arm`。"
         )
     if not _read_state().get("armed", True):
-        raise GuardError("当前为禁止占用状态。运行 `ctl arm` 或按 Ctrl+Alt+Space 可恢复。")
+        raise GuardError(i18n.tr("当前为禁止占用状态。运行 `ctl arm` 或按 Ctrl+Alt+Space 可恢复。"))
 
 
 def assert_user_idle(force: bool = False) -> None:
@@ -243,7 +244,7 @@ def assert_user_idle(force: bool = False) -> None:
 def assert_window_allowed(hwnd: int) -> dict:
     """确认目标窗口在白名单内，返回它的身份信息。"""
     if not hwnd or not winput.is_window(hwnd):
-        raise GuardError("目标窗口不存在或已关闭。")
+        raise GuardError(i18n.tr("目标窗口不存在或已关闭。"))
 
     cfg = load_config()["whitelist"]
 
@@ -309,11 +310,11 @@ def assert_domain_allowed(url: str | None) -> None:
 
     for blocked in cfg.get("domain_blocklist", []):
         if host == blocked or host.endswith("." + blocked):
-            raise GuardError(f"拒绝操作：域名 `{host}` 在禁止名单内。")
+            raise GuardError(i18n.tr("拒绝操作：域名 `{host}` 在禁止名单内。", host=host))
 
     allow = cfg.get("domain_allowlist", [])
     if allow and not any(host == d or host.endswith("." + d) for d in allow):
-        raise GuardError(f"拒绝操作：域名 `{host}` 不在允许名单内。")
+        raise GuardError(i18n.tr("拒绝操作：域名 `{host}` 不在允许名单内。", host=host))
 
 
 # --------------------------------------------------------------------------
@@ -381,16 +382,19 @@ def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
     MB_TOPMOST = 0x00040000
     MB_SETFOREGROUND = 0x00010000
 
-    message = (
-        f"The AI assistant is asking to perform an action with side effects:\n\n"
-        f"        {(element_name or '(unnamed element)')[:80]}\n\n"
-        f"If you approve, tell it this code:\n\n"
-        f"        {code}\n\n"
-        f"If you did not ask for this, click Cancel.\n"
-        f"(the code is valid for {ttl_seconds} seconds and can be used once)"
+    message = i18n.tr(
+        "AI 助手请求执行一个有副作用的操作：\n\n"
+        "        {name}\n\n"
+        "如果你同意，请把这个确认码告诉它：\n\n"
+        "        {code}\n\n"
+        "如果你没有要求过这个操作，请点「取消」。\n"
+        "（确认码 {ttl} 秒内有效，只能用一次）",
+        name=(element_name or i18n.tr("（未命名元素）"))[:80],
+        code=code,
+        ttl=ttl_seconds,
     )
     result = winput.user32.MessageBoxW(
-        None, message, "desktop-mouse — confirm action",
+        None, message, i18n.tr("desktop-mouse 操作确认"),
         MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND,
     )
     if result != 1:  # IDOK
@@ -398,7 +402,7 @@ def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
             CONSENT_PATH.unlink()
         except FileNotFoundError:
             pass
-        raise Refused("用户在确认对话框里点了「取消」，操作已放弃。")
+        raise Refused(i18n.tr("用户在确认对话框里点了「取消」，操作已放弃。"))
 
 
 def verify_user_code(supplied) -> bool:

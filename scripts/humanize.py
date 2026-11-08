@@ -18,6 +18,7 @@ import threading
 import time
 from typing import Callable
 
+import i18n
 import winput
 from winput import Aborted
 
@@ -398,7 +399,7 @@ def drag_servo(
     if get_src_rect is not None:
         src = get_src_rect()
         if src is None:
-            raise OSError("拖拽起点元素已经不在页面上，动作未开始。")
+            raise OSError(i18n.tr("拖拽起点元素已经不在页面上，动作未开始。"))
         sx, sy = _rect_center(src)
         move_to(sx, sy)
         sleep(compress_gently(u(0.10, 0.26), 0.015))
@@ -450,7 +451,7 @@ def drag_servo(
 
             dst = get_dst_rect()
             if dst is None:
-                raise OSError("拖拽过程中目标元素从页面上消失了，已松手。")
+                raise OSError(i18n.tr("拖拽过程中目标元素从页面上消失了，已松手。"))
 
             cx, cy = winput.cursor_pos()
 
@@ -464,7 +465,7 @@ def drag_servo(
                     sleep(_SETTLE_TICK)
                     again = get_dst_rect()
                     if again is None:
-                        raise OSError("拖拽过程中目标元素从页面上消失了，已松手。")
+                        raise OSError(i18n.tr("拖拽过程中目标元素从页面上消失了，已松手。"))
                     cx, cy = winput.cursor_pos()
                     drift = max(abs(again[i] - prev[i]) for i in range(4))
                     prev, dst = again, again
@@ -615,7 +616,7 @@ def paste_text(text: str, *, settle: float | None = None) -> bool:
     try:
         winput.clipboard_set_text(text)
     except OSError as e:
-        raise OSError(f"粘贴失败：{e}")
+        raise OSError(i18n.tr("粘贴失败：{err}", err=e))
 
     try:
         winput.check_abort()

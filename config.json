@@ -1,6 +1,9 @@
 {
   "_comment": "Configuration for the claude-desktop-mouse skill. Changes take effect immediately; no need to restart the daemon.",
 
+  "_language_comment": "Interface language for CLI output, error messages and the approval dialog. \"auto\" follows the Windows UI language; \"zh\" and \"en\" force one. The CLAUDE_MOUSE_LANG environment variable overrides this for a single run.",
+  "language": "auto",
+
   "hotkeys": {
     "_comment": "Global hotkeys. `toggle` switches mouse takeover on/off; `panic` stops everything immediately and disarms. Restart the daemon after changing these. Run `python guardd.py --scan` to see which combinations are free. Note: ctrl+alt+space is usually taken by the IME on Chinese Windows.",
     "toggle": "ctrl+alt+f9",

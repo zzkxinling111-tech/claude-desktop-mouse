@@ -16,6 +16,8 @@ import os
 import time
 from ctypes import wintypes
 
+import i18n
+
 # --------------------------------------------------------------------------
 # 常量
 # --------------------------------------------------------------------------
@@ -23,7 +25,7 @@ from ctypes import wintypes
 IS_WINDOWS = os.name == "nt"
 
 if not IS_WINDOWS:
-    raise RuntimeError("本 skill 只支持 Windows。")
+    raise RuntimeError(i18n.tr("本 skill 只支持 Windows。"))
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -166,7 +168,7 @@ def set_abort_check(fn) -> None:
 def check_abort() -> None:
     if _abort_check is not None and _abort_check():
         release_all()
-        raise Aborted("已收到急停信号，动作中止。")
+        raise Aborted(i18n.tr("已收到急停信号，动作中止。"))
     check_geometry()
 
 
@@ -310,7 +312,7 @@ def to_absolute(x: int, y: int) -> tuple[int, int]:
     """屏幕坐标 → SendInput 要求的 0..65535 归一化坐标。"""
     vx, vy, vw, vh = virtual_screen()
     if vw <= 1 or vh <= 1:
-        raise OSError("虚拟桌面尺寸异常，无法换算坐标。")
+        raise OSError(i18n.tr("虚拟桌面尺寸异常，无法换算坐标。"))
     nx = int(round((x - vx) * 65535 / (vw - 1)))
     ny = int(round((y - vy) * 65535 / (vh - 1)))
     return max(0, min(65535, nx)), max(0, min(65535, ny))
@@ -319,7 +321,7 @@ def to_absolute(x: int, y: int) -> tuple[int, int]:
 def cursor_pos() -> tuple[int, int]:
     pt = wintypes.POINT()
     if not user32.GetCursorPos(ctypes.byref(pt)):
-        raise OSError("GetCursorPos 失败。")
+        raise OSError(i18n.tr("GetCursorPos 失败。"))
     return pt.x, pt.y
 
 
@@ -344,7 +346,7 @@ def send_button(button: str, down: bool) -> None:
     try:
         down_flag, up_flag = _BUTTON_FLAGS[button]
     except KeyError:
-        raise ValueError(f"不支持的鼠标键：{button}（可用 left / right / middle）")
+        raise ValueError(i18n.tr("不支持的鼠标键：{button}（可用 left / right / middle）", button=button))
     _send(_mouse_input(0, 0, down_flag if down else up_flag))
 
 
@@ -395,7 +397,7 @@ def _resolve_vk(name: str) -> int:
         res = user32.VkKeyScanW(ord(key))
         if res != -1:
             return res & 0xFF
-    raise ValueError(f"无法识别的按键：{name}")
+    raise ValueError(i18n.tr("无法识别的按键：{name}", name=name))
 
 
 # 公开别名：守护进程注册热键时要用
@@ -406,7 +408,7 @@ def send_combo(combo: str) -> None:
     """发送组合键，例如 "ctrl+l"、"ctrl+shift+t"、"enter"。"""
     parts = [p.strip() for p in combo.split("+") if p.strip()]
     if not parts:
-        raise ValueError("组合键为空。")
+        raise ValueError(i18n.tr("组合键为空。"))
 
     vks = [_resolve_vk(p) for p in parts]
     # 先全部按下，再逆序抬起 —— 和真实键盘行为一致
@@ -522,7 +524,7 @@ def window_rect(hwnd: int) -> tuple[int, int, int, int]:
     """窗口外框在屏幕上的 (left, top, right, bottom)。"""
     r = wintypes.RECT()
     if not user32.GetWindowRect(hwnd, ctypes.byref(r)):
-        raise OSError("GetWindowRect 失败，窗口可能已关闭。")
+        raise OSError(i18n.tr("GetWindowRect 失败，窗口可能已关闭。"))
     return r.left, r.top, r.right, r.bottom
 
 
@@ -530,7 +532,7 @@ def client_rect(hwnd: int) -> tuple[int, int, int, int]:
     """客户区（去掉标题栏和边框）在屏幕上的 (left, top, right, bottom)。"""
     r = wintypes.RECT()
     if not user32.GetClientRect(hwnd, ctypes.byref(r)):
-        raise OSError("GetClientRect 失败。")
+        raise OSError(i18n.tr("GetClientRect 失败。"))
     pt = wintypes.POINT(0, 0)
     user32.ClientToScreen(hwnd, ctypes.byref(pt))
     return pt.x, pt.y, pt.x + r.right, pt.y + r.bottom
@@ -706,7 +708,7 @@ def clipboard_set_text(text: str) -> None:
         except Exception:
             time.sleep(0.1)
     else:
-        raise OSError("打不开剪贴板（可能被别的程序占着）。")
+        raise OSError(i18n.tr("打不开剪贴板（可能被别的程序占着）。"))
     try:
         cb.EmptyClipboard()
         cb.SetClipboardData(win32con.CF_UNICODETEXT, text)

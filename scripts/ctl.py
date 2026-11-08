@@ -36,10 +36,13 @@ for stream in (sys.stdout, sys.stderr):
 
 import guard
 import humanize
+import i18n
 import observe
 import salience
 import vision
 import winput
+
+tr = i18n.tr
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -69,6 +72,9 @@ _UNTRUSTED_NOTE = (
 # --------------------------------------------------------------------------
 
 def emit(payload: dict, text: str) -> None:
+    # 固定文案在这里统一翻译一遍；already-translated 或带插值的文本找不到
+    # 对应条目时会原样返回，所以这一步对谁都安全。
+    text = tr(text)
     if _quiet:
         _captured.append({"payload": payload, "text": text})
         return
@@ -84,6 +90,7 @@ def wrap_untrusted(body: str) -> str:
 
 def fail(message: str, code: int = EXIT_ERROR) -> int:
     winput.unwatch_geometry()
+    message = tr(message)
     if _quiet:
         _captured.append({"payload": {"error": message}, "text": message})
         return code
@@ -363,7 +370,7 @@ def cmd_find(args) -> int:
                "covered": covered,
                "matches": [observe.public_view(h) for h in hits[:10]]}
     if not hits:
-        emit(payload, f"没有找到 {args.text!r}。")
+        emit(payload, tr("没有找到 {name}。", name=repr(args.text)))
         return EXIT_NOT_FOUND
 
     lines = []
@@ -500,17 +507,18 @@ def cmd_look(args) -> int:
         "wide_change": wide, "wide_box": box, "changed": changed,
     }
     if prev is None:
-        text = (f"扫视基线已建立（{cols}×{rows} 网格，覆盖 "
-                f"{rect[2]-rect[0]}×{rect[3]-rect[1]}）。\n"
-                "下一次 look 会报告和这一帧的差异。")
+        text = tr("扫视基线已建立（{cols}×{rows} 网格，覆盖 {w}×{h}）。\n"
+                  "下一次 look 会报告和这一帧的差异。",
+                  cols=cols, rows=rows,
+                  w=rect[2] - rect[0], h=rect[3] - rect[1])
     elif wide:
-        text = (f"大范围变化：{len(changed)} 处碎片，整体覆盖 "
-                f"({box[0]},{box[1]})-({box[2]},{box[3]})。\n"
-                "通常是一次滚动、跳转或整页重绘，而不是某个控件动了。")
+        text = tr("大范围变化：{n} 处碎片，整体覆盖 ({l},{t})-({r},{b})。\n"
+                  "通常是一次滚动、跳转或整页重绘，而不是某个控件动了。",
+                  n=len(changed), l=box[0], t=box[1], r=box[2], b=box[3])
     elif not changed:
-        text = "画面没有变化。"
+        text = tr("画面没有变化。")
     else:
-        lines = [f"画面有 {len(changed)} 处变化（按显著度排序）："]
+        lines = [tr("画面有 {n} 处变化（按显著度排序）：", n=len(changed))]
         for c in changed[:6]:
             l, t, r, b = c["rect"]
             s = c.get("signal") or {}
@@ -700,7 +708,7 @@ def cmd_drag_to(args) -> int:
 
     src_hits = lookup(args.src, "drag", "拖动源")
     if not src_hits:
-        return fail(f"找不到要拖动的元素 {args.src!r}。", EXIT_NOT_FOUND)
+        return fail(tr("找不到要拖动的元素 {name}。", name=args.src), EXIT_NOT_FOUND)
     src = _pick_nth(src_hits, args.src_nth, f"拖动源 {args.src!r}")
 
     # 目标是文字元素就攥住它、一路盯位置；只给了坐标就当固定点用。
@@ -709,13 +717,13 @@ def cmd_drag_to(args) -> int:
     if args.dst:
         dst_hits = lookup(args.dst, "drop", "拖拽目标")
         if not dst_hits:
-            return fail(f"找不到拖拽目标 {args.dst!r}。", EXIT_NOT_FOUND)
+            return fail(tr("找不到拖拽目标 {name}。", name=args.dst), EXIT_NOT_FOUND)
         dst = _pick_nth(dst_hits, args.dst_nth, f"拖拽目标 {args.dst!r}")
         guard.assert_approved(dst["name"], getattr(args, "consent_code", None))
     elif args.to_x is not None and args.to_y is not None:
         if not winput.point_over_window(win["hwnd"], args.to_x, args.to_y):
             return fail(
-                f"({args.to_x}, {args.to_y}) 这一点上盖着别的窗口，不在浏览器里。",
+                tr("({x}, {y}) 这一点上盖着别的窗口，不在浏览器里。", x=args.to_x, y=args.to_y),
                 EXIT_ERROR,
             )
         fixed_rect = (int(args.to_x) - 2, int(args.to_y) - 2,
@@ -1145,16 +1153,16 @@ def cmd_batch(args) -> int:
                 _captured.append({"payload": {}, "text": f"[需要确认] {e}"})
             except guard.GuardError as e:
                 rc = EXIT_ERROR
-                _captured.append({"payload": {}, "text": f"[安全拦截] {e}"})
+                _captured.append({"payload": {}, "text": tr("[安全拦截] {err}", err=e)})
             except winput.Aborted as e:
                 rc = EXIT_ERROR
-                _captured.append({"payload": {}, "text": f"[已中止] {e}"})
+                _captured.append({"payload": {}, "text": tr("[已中止] {err}", err=e)})
             except winput.GeometryChanged as e:
                 rc = EXIT_ERROR
-                _captured.append({"payload": {}, "text": f"[窗口已变化] {e}"})
+                _captured.append({"payload": {}, "text": tr("[窗口已变化] {err}", err=e)})
             except OSError as e:
                 rc = EXIT_ERROR
-                _captured.append({"payload": {}, "text": f"[系统错误] {e}"})
+                _captured.append({"payload": {}, "text": tr("[系统错误] {err}", err=e)})
 
             detail = _captured[-1]["text"] if _captured else ""
             ok = rc == EXIT_OK
@@ -1201,26 +1209,26 @@ def cmd_batch(args) -> int:
         "failed_at": failed_at, "results": results,
     }
 
-    lines = [f"Batch: {len(steps)} steps"]
+    lines = [tr("批量执行：共 {n} 步", n=len(steps))]
     for r in results:
-        mark = "ok  " if r["ok"] else "FAIL"
+        mark = "ok  " if r["ok"] else tr("失败")
         lines.append(f"  {r['step']}. {r.get('label') or r['action']:<28} {mark}")
 
     if failed_at is None:
-        lines.append(f"All {done} steps succeeded.")
+        lines.append(tr("全部 {n} 步成功。", n=done))
     else:
         lines.append("")
-        lines.append(f"Stopped at step {failed_at}:")
-        detail = results[-1]["detail"] or "(no further detail)"
+        lines.append(tr("停在第 {n} 步：", n=failed_at))
+        detail = results[-1]["detail"] or tr("（没有更多信息）")
         lines.extend("  " + ln for ln in detail.strip().splitlines())
         lines.append("")
         if exit_code == EXIT_NEEDS_CONSENT:
-            lines.append(
-                "This step needs the user: read the 4-digit code from the dialog, "
-                "then re-run this step alone with --consent-code."
-            )
+            lines.append(tr(
+                "这一步需要你本人确认：对话框里的 4 位码告诉助手后，"
+                "带上 --consent-code 单独重跑这一步即可。"
+            ))
         else:
-            lines.append("Later steps were skipped. Fix this one and re-submit the batch.")
+            lines.append(tr("后面的步骤没有执行。修正这一步后重新提交整批即可。"))
 
     emit(payload, "\n".join(lines))
     return exit_code
@@ -1432,22 +1440,22 @@ def main(argv=None) -> int:
         return args.func(args)
     except guard.Refused as e:
         log_blocked(args.cmd, "refused", str(e))
-        return fail(f"[拒绝执行]\n{e}", EXIT_REFUSED)
+        return fail(tr("[拒绝执行]\n{err}", err=e), EXIT_REFUSED)
     except guard.NeedsConsent as e:
         log_blocked(args.cmd, "needs_consent", str(e))
-        return fail(f"[需要用户确认]\n{e}", EXIT_NEEDS_CONSENT)
+        return fail(tr("[需要用户确认]\n{err}", err=e), EXIT_NEEDS_CONSENT)
     except guard.GuardError as e:
         log_blocked(args.cmd, "blocked", str(e))
-        return fail(f"[安全拦截] {e}", EXIT_ERROR)
+        return fail(tr("[安全拦截] {err}", err=e), EXIT_ERROR)
     except winput.Aborted as e:
         log_blocked(args.cmd, "aborted", str(e))
-        return fail(f"[已中止] {e}", EXIT_ERROR)
+        return fail(tr("[已中止] {err}", err=e), EXIT_ERROR)
     except winput.GeometryChanged as e:
         log_blocked(args.cmd, "geometry_changed", str(e))
-        return fail(f"[窗口已变化] {e}", EXIT_ERROR)
+        return fail(tr("[窗口已变化] {err}", err=e), EXIT_ERROR)
     except OSError as e:
         log_blocked(args.cmd, "error", str(e))
-        return fail(f"[系统错误] {e}", EXIT_ERROR)
+        return fail(tr("[系统错误] {err}", err=e), EXIT_ERROR)
     except KeyboardInterrupt:
         winput.release_all()
         log_blocked(args.cmd, "interrupted", "用户按下了 Ctrl+C")

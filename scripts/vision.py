@@ -23,6 +23,7 @@ import ctypes
 import time
 from ctypes import wintypes
 
+import i18n
 import winput  # 只为了复用已设置好的 DPI 感知
 
 user32 = winput.user32
@@ -95,7 +96,7 @@ class _Grabber:
         self.close()
         self._screen = user32.GetDC(0)     # 屏幕 DC —— 窗口 DC 抓不到 GPU 内容
         if not self._screen:
-            raise OSError("拿不到屏幕 DC。")
+            raise OSError(i18n.tr("拿不到屏幕 DC。"))
         self._mem = gdi32.CreateCompatibleDC(self._screen)
         bi = _BMI()
         h = bi.bmiHeader
@@ -106,7 +107,7 @@ class _Grabber:
         self._dib = gdi32.CreateDIBSection(
             self._mem, ctypes.byref(bi), 0, ctypes.byref(bits), None, 0)
         if not self._dib or not bits.value:
-            raise OSError("创建 DIB 失败。")
+            raise OSError(i18n.tr("创建 DIB 失败。"))
         gdi32.SelectObject(self._mem, self._dib)
         self._bits = bits.value
         self._w, self._h = sw, sh
@@ -120,7 +121,7 @@ class _Grabber:
         oy = user32.GetSystemMetrics(77)
         if not gdi32.BitBlt(self._mem, 0, 0, self._w, self._h,
                             self._screen, 0, 0, SRCCOPY):
-            raise OSError("抓屏失败。")
+            raise OSError(i18n.tr("抓屏失败。"))
         return (ox, oy, ox + self._w, oy + self._h)
 
     def sample(self, rect, cols, rows) -> list[int]:
@@ -197,7 +198,7 @@ def capture(rect=None, cols: int = DEFAULT_COLS, rows: int = DEFAULT_ROWS) -> Fr
 def compare(a: Frame, b: Frame, threshold: int = DEFAULT_THRESHOLD) -> dict[int, int]:
     """逐格灰度差。返回 {格子索引: 差值}，只保留超过门槛的。"""
     if (a.cols, a.rows) != (b.cols, b.rows):
-        raise ValueError("两帧的网格尺寸不一致，不能比较。")
+        raise ValueError(i18n.tr("两帧的网格尺寸不一致，不能比较。"))
     out = {}
     for i, (x, y) in enumerate(zip(a.gray, b.gray)):
         d = x - y
