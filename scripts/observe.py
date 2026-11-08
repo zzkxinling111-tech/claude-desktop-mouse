@@ -76,6 +76,24 @@ TYPE_PRIORITY = {
 }
 _DEFAULT_PRIORITY = 3
 
+# 按「意图」调整类型优先级。页面经常把说明文字和可操作控件排在一起，
+# 光看文字分不出该动哪个，只能靠类型。
+#
+#   drag  拖动源 —— 词块、卡片、列表项这类"能被拎起来"的东西
+#   drop  落点   —— 输入框、空列表项、容器
+_INTENT_OVERRIDES: dict[str, dict[str, int]] = {
+    "drag": {
+        "Text": 0, "ListItem": 0, "DataItem": 0, "Button": 0, "Edit": 0,
+        "Image": 1, "Hyperlink": 1, "Custom": 2, "Group": 5, "Pane": 5,
+        "Document": 6, "Header": 6,
+    },
+    "drop": {
+        "Edit": 0, "ListItem": 0, "DataItem": 0, "ComboBox": 0,
+        "Group": 1, "Pane": 2, "Custom": 2, "Button": 3, "Document": 3,
+        "Text": 5, "Hyperlink": 6, "Image": 6,
+    },
+}
+
 # 只有这些类型才适合作为「输入文本」的目标
 TEXT_INPUT_TYPES = {"Edit", "ComboBox", "Document"}
 
@@ -257,6 +275,33 @@ def format_nodes(nodes: list[dict], *, include_offscreen: bool = False) -> str:
 # 查找元素
 # --------------------------------------------------------------------------
 
+def hittable_point(
+    hwnd: int, rect: tuple[int, int, int, int]
+) -> tuple[int, int] | None:
+    """在元素矩形里找一个**真的点得到**的点。
+
+    一般就是中心。但如果中心被任务栏、置顶小窗或者别的应用的窗口盖住了，
+    就往四分之一点挪挪看。整块都被盖住就返回 None —— 这时应当明确报
+    「够不着」，而不是照着坐标点下去，让点到的东西是任务栏。
+    """
+    l, t, r, b = rect
+    if r - l <= 0 or b - t <= 0:
+        return None
+    cx, cy = (l + r) // 2, (t + b) // 2
+    candidates = [
+        (cx, cy),
+        (l + (r - l) // 4, t + (b - t) // 4),
+        (l + 3 * (r - l) // 4, t + (b - t) // 4),
+        (l + (r - l) // 4, t + 3 * (b - t) // 4),
+        (l + 3 * (r - l) // 4, t + 3 * (b - t) // 4),
+        (cx, t + max(1, (b - t) // 5)),
+    ]
+    for x, y in candidates:
+        if winput.point_over_window(hwnd, x, y):
+            return x, y
+    return None
+
+
 def find_elements(
     hwnd: int,
     text: str,
@@ -264,6 +309,7 @@ def find_elements(
     max_nodes: int = 4000,
     onscreen_only: bool = True,
     intent: str = "click",
+    require_hittable: bool = True,
 ) -> list[dict]:
     """按可见文字查找元素，最匹配的排在最前。
 
@@ -276,6 +322,8 @@ def find_elements(
     `intent` 决定第 2 步怎么排：
       - "click"：按钮、链接这类可点控件优先
       - "type" ：只有输入框、下拉框、文档本体才可能入选，其余全部降级
+      - "drag" ：可被拖动的词块、列表项、卡片优先
+      - "drop" ：输入框、空列表项、容器优先（落点）
     """
     query = text.strip().lower()
     if not query:
@@ -303,16 +351,59 @@ def find_elements(
         priority = TYPE_PRIORITY.get(n["type"], _DEFAULT_PRIORITY)
         if intent == "type" and n["type"] not in TEXT_INPUT_TYPES:
             priority = max(priority, 5)
+        override = _INTENT_OVERRIDES.get(intent)
+        if override:
+            priority = override.get(n["type"], priority)
 
         area = (r - l) * (b - t)
+
+        # 只保留真的够得着的元素。UIA 的「可见」是在页面里的意思，
+        # 被任务栏或别的窗口盖住的部分照样标成可见 —— 点下去只会点到盖住它的东西。
+        hit = hittable_point(hwnd, (l, t, r, b))
+        reachable = hit is not None
+        if hit is None:
+            if require_hittable:
+                continue
+            hit = ((l + r) // 2, (t + b) // 2)
+
         scored.append((
             (tier, priority, len(name), area),
-            {**{k: v for k, v in n.items() if k != "_el"},
-             "center": ((l + r) // 2, (t + b) // 2)},
+            {**n, "center": hit, "hittable": reachable},
         ))
 
     scored.sort(key=lambda pair: pair[0])
     return [item for _, item in scored]
+
+
+def public_view(node: dict | None) -> dict | None:
+    """去掉内部的 COM 引用，只留能 JSON 序列化的字段。
+
+    查找结果里保留着元素对象本身 —— 后面的「移动完再核对一次位置」要用它
+    重新读当前矩形。但那个对象不能出现在输出里。
+    """
+    if node is None:
+        return None
+    return {k: v for k, v in node.items() if k != "_el"}
+
+
+def live_rect(node: dict | None) -> tuple[int, int, int, int] | None:
+    """读元素**此刻**在屏幕上的矩形。
+
+    这是闭环拖拽和点击前校验的基础：元素对象在页面重排后依然有效，
+    但它的坐标会变。每次要坐标的时候都得重新问，不能缓存。
+    """
+    if not node:
+        return None
+    el = node.get("_el")
+    if el is None:
+        return None
+    try:
+        r = el.CurrentBoundingRectangle
+    except Exception:
+        return None
+    if r.right - r.left <= 0 or r.bottom - r.top <= 0:
+        return None
+    return (int(r.left), int(r.top), int(r.right), int(r.bottom))
 
 
 def element_from_point(x: int, y: int) -> dict | None:

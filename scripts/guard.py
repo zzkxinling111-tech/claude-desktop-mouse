@@ -255,6 +255,15 @@ def assert_window_allowed(hwnd: int) -> dict:
 
     pid = winput.window_pid(hwnd)
     proc = winput.process_name(pid)
+
+    # 永久禁止名单先查。它和下面的浏览器白名单是两条独立的判断：
+    # 白名单决定"允许谁"，禁止名单保证"哪怕白名单配错了也碰不了这几个"。
+    blocked = {p.lower() for p in cfg.get("blocked_processes", [])}
+    if proc.lower() in blocked:
+        raise GuardError(
+            f"拒绝操作：进程 `{proc}` 在永久禁止名单内（终端、注册表、磁盘工具这类）。"
+        )
+
     if proc not in cfg["browser_processes"]:
         raise GuardError(
             f"拒绝操作：进程 `{proc}` 不在白名单内"
@@ -310,11 +319,29 @@ def assert_domain_allowed(url: str | None) -> None:
 # --------------------------------------------------------------------------
 # 审批门
 # --------------------------------------------------------------------------
+#
+# 规则只有一条：**凡是命中有后果的词，一律问用户。**
+#
+# 没有"直接拒绝"这一档，也没有"完全自动"这一档 —— 前者拿走了用户做成的权利，
+# 后者拿走了用户决定的权利。用户始终是唯一能授权的人。
+#
+# 授权凭证是系统弹窗里的一次性确认码：它只出现在弹窗上，不写进任何模型能读到
+# 的明文位置。模型自己加参数不算数。
+
+_CONSENT_MAX_ATTEMPTS = 3
+
+
+def _code_hash(code: str) -> str:
+    """确认码的哈希。文件里只存哈希，读到它也拿不到码本身。"""
+    import hashlib
+
+    return hashlib.sha256(b"desktop-mouse-consent-v1" + str(code).encode()).hexdigest()
+
 
 def check_approval(element_name: str | None) -> dict:
-    """按危险词判定操作档位。
+    """判定这个操作要不要问用户。
 
-    返回 {"tier": "ok" | "confirm" | "refuse", "word": 命中的词 或 None}
+    返回 {"tier": "ok" | "ask", "word": 命中的词 或 None}
     """
     if not element_name:
         return {"tier": "ok", "word": None}
@@ -325,13 +352,9 @@ def check_approval(element_name: str | None) -> dict:
         return {"tier": "ok", "word": None}
     lowered = name.lower()
 
-    for word in cfg["tier_refuse"]:
+    for word in cfg["danger_words"]:
         if word.lower() in lowered:
-            return {"tier": "refuse", "word": word}
-
-    for word in cfg["tier_confirm"]:
-        if word.lower() in lowered:
-            return {"tier": "confirm", "word": word}
+            return {"tier": "ask", "word": word}
 
     return {"tier": "ok", "word": None}
 
@@ -339,13 +362,17 @@ def check_approval(element_name: str | None) -> dict:
 def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
     """弹一个系统对话框，把一次性确认码**只显示给用户**。
 
-    这个码绝不能写进模型能读到的任何地方 —— 一旦模型也能看到，这道门就白设了。
-    所以它只出现在对话框里，以及一个仅用于比对的临时文件里。
+    码不落盘明文：consent.json 里只存哈希，而且最多只接受 3 次核对尝试。
+    模型即便读到那个文件，也既拿不到码、也没法靠穷举试出来。
     """
     code = f"{secrets.randbelow(10000):04d}"
     CONSENT_PATH.write_text(
-        json.dumps({"code": code, "target": (element_name or "")[:80],
-                    "expires": time.time() + ttl_seconds}),
+        json.dumps({
+            "hash": _code_hash(code),
+            "target": (element_name or "")[:80],
+            "expires": time.time() + ttl_seconds,
+            "attempts": _CONSENT_MAX_ATTEMPTS,
+        }),
         encoding="utf-8",
     )
 
@@ -355,7 +382,7 @@ def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
     MB_SETFOREGROUND = 0x00010000
 
     message = (
-        f"Claude 请求执行一个有副作用的操作：\n\n"
+        f"AI 助手请求执行一个有副作用的操作：\n\n"
         f"        {(element_name or '(未命名元素)')[:80]}\n\n"
         f"如果你同意，请把这个确认码告诉它：\n\n"
         f"        {code}\n\n"
@@ -375,68 +402,70 @@ def prompt_user_code(element_name: str, *, ttl_seconds: int = 150) -> None:
 
 
 def verify_user_code(supplied) -> bool:
-    """核对用户报回来的确认码。一次性，用掉即失效。"""
+    """核对用户报回来的确认码。一次性，且最多试 3 次。"""
     try:
         data = json.loads(CONSENT_PATH.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return False
 
+    attempts = int(data.get("attempts", 0)) - 1
+    expired = time.time() > float(data.get("expires", 0))
+
+    if expired or attempts <= 0:
+        _drop_consent()
+        return False
+
+    ok = secrets.compare_digest(_code_hash(str(supplied).strip()), str(data.get("hash", "")))
+
+    if ok:
+        _drop_consent()  # 用掉即失效
+    elif attempts <= 1:
+        _drop_consent()  # 试完了，作废
+    else:
+        data["attempts"] = attempts
+        try:
+            CONSENT_PATH.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            _drop_consent()
+    return ok
+
+
+def _drop_consent() -> None:
     try:
         CONSENT_PATH.unlink()
     except FileNotFoundError:
         pass
 
-    if time.time() > float(data.get("expires", 0)):
-        return False
-    return secrets.compare_digest(str(supplied).strip(), str(data.get("code", "")))
 
+def assert_approved(element_name: str | None, consent_code=None) -> dict:
+    """在动手之前调用。
 
-def assert_approved(
-    element_name: str | None,
-    user_consent: bool,
-    consent_code=None,
-) -> dict:
-    """在点击前调用。三层判定：放行 / 要求用户同意 / 直接拒绝。
+    命中危险词时**不问模型，直接弹窗问用户**：
 
-    诚实说明这个门能挡什么、挡不住什么：
-      - 挡得住：误触、模型判断失误
-      - `tier_refuse` 挡得住注入：代码直接拒绝，没有任何开关能绕过
-      - `tier_confirm` 只靠 `--i-have-user-consent` 的话**挡不住**被注入的模型，
-        因为它可以自己加上这个参数。想要真正的门，把 config.json 里的
-        `approval.require_user_code` 打开 —— 那时必须由用户在系统弹窗里读到
-        一次性确认码再报回来，模型无法自行完成。
+      1. 第一次调用 → 弹窗出现，里面有一个 4 位码，模型读不到
+      2. 用户把码告诉模型 → 模型带 `--consent-code <码>` 重试
+      3. 码对 → 执行；码错 / 过期 / 用户点了取消 → 不执行
+
+    没有可以跳过这一步的参数，也没有能把它关掉的配置项。
     """
     verdict = check_approval(element_name)
-    tier = verdict["tier"]
+    if verdict["tier"] != "ask":
+        return verdict
 
-    if tier == "refuse":
-        raise Refused(
-            f"拒绝执行：目标 `{element_name}` 命中付款类关键词「{verdict['word']}」。\n"
-            "这类操作本 skill 一律不做，请你亲自完成。"
+    if not consent_code:
+        prompt_user_code(element_name or "")
+        raise NeedsConsent(
+            f"目标 `{element_name}` 命中关键词「{verdict['word']}」，"
+            "这属于有副作用的操作，已经弹出一个系统确认框。\n"
+            "请让用户看对话框里的 4 位确认码，拿到后加上 "
+            "`--consent-code <数字>` 重新执行。"
         )
 
-    if tier == "confirm":
-        if not user_consent:
-            raise NeedsConsent(
-                f"需要用户确认：目标 `{element_name}` 命中关键词「{verdict['word']}」，"
-                "这属于有副作用的操作。\n"
-                "请先向用户说明你要点的是什么、会产生什么后果，"
-                "得到明确同意后，再加 `--i-have-user-consent` 重新执行。"
-            )
-
-        if load_config()["approval"].get("require_user_code", False):
-            if not consent_code:
-                prompt_user_code(element_name or "")
-                raise NeedsConsent(
-                    "已经弹出一个系统确认对话框，里面有一个 4 位确认码。\n"
-                    "请让用户把对话框里的数字告诉你，然后加上 "
-                    "`--consent-code <数字>` 重新执行。"
-                )
-            if not verify_user_code(consent_code):
-                raise NeedsConsent(
-                    "确认码不正确或已经过期。请重新征求用户同意 —— "
-                    "去掉 --consent-code 再执行一次会重新弹窗。"
-                )
+    if not verify_user_code(consent_code):
+        raise NeedsConsent(
+            "确认码不正确、已过期、或者尝试次数已经用完。\n"
+            "请重新征得用户同意 —— 去掉 --consent-code 再执行一次会重新弹窗。"
+        )
 
     return verdict
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 import time
 from typing import Callable
 
@@ -224,8 +225,12 @@ def move_to(x: int, y: int, *, deliberate: bool = False) -> None:
 # 四种手势
 # --------------------------------------------------------------------------
 
-def click(x: int, y: int, *, button: str = "left", hover: bool = True) -> None:
-    move_to(x, y)
+def click_here(*, button: str = "left", hover: bool = True) -> None:
+    """在**光标当前位置**按下并抬起，不再移动。
+
+    用于「已经移过去、并且在移动之后又重新核对过位置」的场景 —— 这时再调用
+    click(x, y) 会按一个可能已经过时的坐标重新走一遍，页面一重排就点空。
+    """
     if hover:
         # 人不会一到就立刻按。这个停顿只按平方根压缩 —— 压得太短，
         # 界面可能来不及处理悬停，点击会落空。
@@ -235,8 +240,13 @@ def click(x: int, y: int, *, button: str = "left", hover: bool = True) -> None:
     winput.send_button(button, False)
 
 
-def double_click(x: int, y: int, *, button: str = "left") -> None:
+def click(x: int, y: int, *, button: str = "left", hover: bool = True) -> None:
     move_to(x, y)
+    click_here(button=button, hover=hover)
+
+
+def double_click_here(*, button: str = "left") -> None:
+    """在光标当前位置双击。"""
     sleep(compress_gently(u(0.08, 0.25), 0.012))
 
     # 两次点击的间隔**不按速度压缩**：它有硬性上限，超过系统的双击阈值
@@ -253,14 +263,18 @@ def double_click(x: int, y: int, *, button: str = "left") -> None:
             sleep(gap * u(0.85, 1.15))
 
 
-def long_press(x: int, y: int, ms: int = 900, *, button: str = "left") -> None:
-    """按下不动，保持 ms 毫秒后抬起。
+def double_click(x: int, y: int, *, button: str = "left") -> None:
+    move_to(x, y)
+    double_click_here(button=button)
+
+
+def long_press_here(ms: int = 900, *, button: str = "left") -> None:
+    """在光标当前位置按住不动，保持 ms 毫秒后抬起。
 
     用于"按住以确认"、长按菜单、以及网页上的移动端模拟长按。
     按住时长是语义性的，不按倍速压缩 —— 它就是要按那么久。
     """
     hold = max(0.3, min(10.0, ms / 1000.0))
-    move_to(x, y)
     sleep(compress_gently(u(0.10, 0.28), 0.015))
     winput.send_button(button, True)
     try:
@@ -268,6 +282,11 @@ def long_press(x: int, y: int, ms: int = 900, *, button: str = "left") -> None:
     finally:
         # 无论正常结束还是被急停打断，都要抬起，不能留下按住的鼠标
         winput.send_button(button, False)
+
+
+def long_press(x: int, y: int, ms: int = 900, *, button: str = "left") -> None:
+    move_to(x, y)
+    long_press_here(ms, button=button)
 
 
 def drag(
@@ -301,6 +320,198 @@ def drag(
             # 落点略作停顿，像人在确认位置
             sleep(compress_gently(u(0.12, 0.30), 0.02))
     finally:
+        winput.send_button(button, False)
+
+
+# --------------------------------------------------------------------------
+# 闭环拖拽 —— 拖着走，边走边重新确认目标在哪
+# --------------------------------------------------------------------------
+#
+# 开环拖拽（上面那个 drag）的问题：终点坐标在一次动作开始前就定死了。
+# 一旦拖拽途中页面重排 —— 分屏、窗口被拉窄、内容加载完把布局顶开 ——
+# 光标还在往一个已经不存在的位置走，结果要么放错格、要么一直按着不放。
+#
+# 这里换一种做法：手里攥着**元素的引用**，每 10 毫秒重新问一次它此刻在哪，
+# 光标朝"此刻"的位置走。松手之前再确认一次目标还在原地。
+#
+# 归这一层负责的只有三件事：朝目标走、确认在不在、出事一定松手。
+# 目标该不该是这个、拖过去对不对，是模型的事。
+
+_SERVO_TICK = 0.010      # 伺服刷新间隔（秒）
+_SERVO_MAX_STEP = 70.0   # 单步最大位移（像素）
+_SERVO_MIN_STEP = 4.0
+
+# 判定"已经放对了"之前，要看到目标连续这么多次采样都不动。
+# 页面重排带了 CSS 过渡动画时，只查一次会被动画骗过去 —— 实测踩过：
+# 看到进框就松手，150ms 的动画还没走完，格子自己飘走了，词掉在外面。
+_SETTLE_SAMPLES = 3
+_SETTLE_TICK = 0.08
+_SETTLE_TOLERANCE = 2    # 像素；这个范围内视为没动
+
+
+def _busy(seconds: float) -> None:
+    """忙等到指定时刻。
+
+    Windows 上 time.sleep 的实际粒度可能到 15 毫秒，用它做 10 毫秒的伺服
+    会让循环频率变得不可预测。拖拽持续时间短，忙等的代价可以接受。
+    """
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        winput.check_abort()
+
+
+def _rect_center(rect) -> tuple[int, int]:
+    l, t, r, b = rect
+    return (l + r) // 2, (t + b) // 2
+
+
+def _inside(rect, x: int, y: int) -> bool:
+    l, t, r, b = rect
+    return l <= x <= r and t <= y <= b
+
+
+def drag_servo(
+    get_dst_rect: Callable[[], tuple[int, int, int, int] | None],
+    *,
+    get_src_rect: Callable[[], tuple[int, int, int, int] | None] | None = None,
+    button: str = "left",
+    timeout: float = 3.0,
+    verify: Callable[[int, int], bool] | None = None,
+    aim: Callable[[tuple[int, int, int, int]], tuple[int, int]] | None = None,
+) -> dict:
+    """拖到「目标元素此刻所在的地方」，而不是它一开始所在的地方。
+
+    参数：
+      get_dst_rect  每次调用返回目标元素当前的 (l,t,r,b)；返回 None 表示它没了
+      get_src_rect  同上，起点元素；不给则从光标当前位置起拖
+      verify        松手前的额外校验，返回 False 就继续伺服、不松手
+      aim           给定目标矩形，返回这一轮要往哪个点走。缺省是矩形中心；
+                    调用方可以用它避开被任务栏盖住的那一块
+
+    保证：
+      - 无论成功、失败、超时、被急停，鼠标按键一定会被抬起
+      - 目标消失时报错，不会拖着一个不存在的东西继续走
+    """
+    # 上一次动作如果被强杀，系统里可能还留着"按下"状态。先清干净再开始。
+    winput.release_all()
+
+    if get_src_rect is not None:
+        src = get_src_rect()
+        if src is None:
+            raise OSError("拖拽起点元素已经不在页面上，动作未开始。")
+        sx, sy = _rect_center(src)
+        move_to(sx, sy)
+        sleep(compress_gently(u(0.10, 0.26), 0.015))
+    else:
+        sx, sy = winput.cursor_pos()
+
+    deadline = time.monotonic() + max(0.5, float(timeout))
+
+    # 看门狗：万一主循环卡在某个阻塞调用里，到点也有人把键抬起来。
+    watchdog = threading.Timer(float(timeout) + 1.5, winput.release_all)
+    watchdog.daemon = True
+
+    winput.check_abort()
+    winput.send_button(button, True)
+    watchdog.start()
+
+    def _aim(rect):
+        if aim is not None:
+            got = aim(rect)
+            if got:
+                return got
+        return _rect_center(rect)
+
+    steps = 0
+    try:
+        # 按住之后先停一下，让界面确认这是拖拽而不是点击
+        sleep(compress_gently(u(0.08, 0.18), 0.015))
+
+        # 越过拖拽阈值：多数界面要求先移动几像素才认定为拖拽
+        seed = get_dst_rect()
+        if seed is not None:
+            tx, ty = _aim(seed)
+            dx, dy = tx - sx, ty - sy
+        else:
+            dx, dy = 1.0, 1.0
+        length = math.hypot(dx, dy) or 1.0
+        thresh = u(3.0, 6.0)
+        winput.send_move(int(round(sx + dx / length * thresh)),
+                         int(round(sy + dy / length * thresh)))
+        sleep(compress_gently(u(0.02, 0.05), 0.008))
+
+        while True:
+            winput.check_abort()
+
+            if time.monotonic() > deadline:
+                raise OSError(
+                    f"拖拽超时（{timeout:g} 秒内没能稳定落在目标上），已松手。"
+                )
+
+            dst = get_dst_rect()
+            if dst is None:
+                raise OSError("拖拽过程中目标元素从页面上消失了，已松手。")
+
+            cx, cy = winput.cursor_pos()
+
+            if _inside(dst, cx, cy):
+                # 到了。但不能马上下结论 —— 页面重排常常带过渡动画，
+                # 这一瞬间"在框里"的下一秒就可能不在了。所以要看到它**停稳**：
+                # 连续几次采样里位置几乎不动、光标也一直在框内，才算真的放对。
+                prev = dst
+                settled = True
+                for _ in range(_SETTLE_SAMPLES):
+                    sleep(_SETTLE_TICK)
+                    again = get_dst_rect()
+                    if again is None:
+                        raise OSError("拖拽过程中目标元素从页面上消失了，已松手。")
+                    cx, cy = winput.cursor_pos()
+                    drift = max(abs(again[i] - prev[i]) for i in range(4))
+                    prev, dst = again, again
+                    if drift > _SETTLE_TOLERANCE or not _inside(again, cx, cy):
+                        settled = False
+                        break
+
+                if settled:
+                    # 人也是"对准、停一下、再松手"。这一停之后必须再确认一次，
+                    # 否则停顿本身就是新的失手窗口。
+                    sleep(compress_gently(u(0.12, 0.30), 0.02))
+                    final = get_dst_rect()
+                    fx, fy = winput.cursor_pos()
+                    if (final is not None and _inside(final, fx, fy)
+                            and (verify is None or verify(fx, fy))):
+                        return {
+                            "from": [int(sx), int(sy)],
+                            "to": [int(fx), int(fy)],
+                            "steps": steps,
+                            "target_rect": list(final),
+                        }
+                    if final is not None:
+                        dst = final
+                    cx, cy = fx, fy
+                # 还没停稳或校验没过，就按最新的位置继续追，不松手
+
+            tx, ty = _aim(dst)
+            ddx, ddy = tx - cx, ty - cy
+            dist = math.hypot(ddx, ddy)
+
+            if dist < 1.0:
+                _busy(_SERVO_TICK)
+                continue
+
+            step = max(_SERVO_MIN_STEP, min(_SERVO_MAX_STEP, dist * 0.45))
+            # 一点抖动，但幅度压得很小 —— 拖拽时手是稳的
+            jx = g(0.0, 0.6, -1.5, 1.5)
+            jy = g(0.0, 0.6, -1.5, 1.5)
+            winput.send_move(
+                int(round(cx + ddx / dist * step + jx)),
+                int(round(cy + ddy / dist * step + jy)),
+            )
+            steps += 1
+            _busy(_SERVO_TICK)
+    finally:
+        watchdog.cancel()
+        # 这是最重要的一行：任何路径下都不能把鼠标留在按下状态
         winput.send_button(button, False)
 
 

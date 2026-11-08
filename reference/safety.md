@@ -27,45 +27,59 @@ are genuinely safe and which parts rely on the model behaving.**
 | **Corner failsafe** | `guard.corner_failsafe()` | **Strong** | Slam the cursor into the top-left corner and hold 0.35 s |
 | **Window whitelist** | `guard.assert_window_allowed()` | **Strong** | Checks window class **and** process name. Non-browser windows are refused |
 | **Privilege check** | `guard.assert_window_allowed()` | **Strong** | Refuses elevated targets instead of trying and failing |
-| **Payment refusal** | `guard.assert_approved()` tier_refuse | **Strong** | Refused outright. **No flag overrides it** |
+| **Consent dialog** | `guard.assert_approved()` | **Strong** | Dangerous keywords always raise a system dialog carrying a one-time code. **No flag and no config key skips it** |
 | **Password field block** | `ctl.cmd_type()` | **Strong** | Based on UIA's `IsPassword`. Code-level, no switch |
 | **URL guard** | `ctl.assert_expected_url()` | **Strong** | `--expect-url` aborts if the page changed under a multi-step flow |
 | **Action timeout** | `guard.set_deadline()` | **Strong** | Hard per-action deadline, scaled to the expected duration |
+| **Guaranteed release** | `humanize.drag_servo()` | **Strong** | Every exit path — error, timeout, panic — lifts the mouse button |
+| **Covered-point check** | `winput.point_over_window()` | **Strong** | Verifies the pixel actually belongs to the browser, not to a taskbar or overlay sitting on top of it |
 | **Log redaction** | `guard.log_event()` | **Strong** | Records actions, never typed text, clipboard contents, or screenshot data |
 | **Screenshot scope** | `observe.capture_region()` | **Medium-strong** | `BitBlt` reads only the target window's region, not the whole screen |
-| **Approval gate** | tier_confirm | **Medium** | See "the weakest layer" below |
 | **Prompt conventions** | `ctl.wrap_untrusted()` | **Weak** | A prompt, not an enforcement mechanism |
 
 ---
 
-## 3. The weakest layer: `--i-have-user-consent`
+## 3. Consequential actions: the user decides, always
 
-This is the one place where the design has to be upfront about its limits.
+There is exactly **one** rule here, and it is enforced in code:
 
-**In the default (`balanced`) profile**, actions matching "delete / send / publish / submit /
-upload / authorize" are blocked until Claude passes `--i-have-user-consent`.
+> **Any element whose visible text matches a dangerous keyword results in the user being
+> asked — directly, through a system dialog.**
 
-The problem: **Claude is the one who adds that flag.**
+Not "refused and handed back". Not "the model may approve it for the user". **Asked.**
 
-- Against T1 (misjudgement, slips): ✅ effective. The model has to stop and handle the
-  refusal, which usually means asking the user
-- Against T2 (prompt injection): ❌ **not effective**. An injected model can add the flag itself
+The flow:
 
-**To actually close T2**, turn this on in `config.json`:
+1. The model tries to click something matching the list (`支付`, `删除`, `send`, `publish`,
+   `log out`, …)
+2. A **system dialog** appears on the user's screen, containing a 4-digit one-time code
+3. That code exists **only in the dialog**. `consent.json` holds a salted SHA-256 of it,
+   never the plaintext, so a model that reads the file learns nothing
+4. The user reads the code to the model; the model retries with `--consent-code <digits>`
+5. Correct → the action runs. Wrong, expired, or cancelled → it doesn't
 
-```json
-"approval": { "require_user_code": true }
-```
+Additional limits:
 
-The flow then becomes:
+- **Single use.** Consumed on success.
+- **150-second TTL.**
+- **At most three attempts**, after which the whole consent dies. Brute-forcing four digits
+  is not viable when each guess costs a fresh dialog.
 
-1. Claude attempts the action → a **system dialog** appears containing a 4-digit one-time code
-2. That code is displayed **only in the dialog**. It is written nowhere Claude can read
-3. The user reads it off the dialog and tells Claude
-4. Claude retries with `--consent-code <digits>` → verified → the action runs
+### What was deliberately removed
 
-The model **cannot complete this on its own** — it genuinely has to get the number from the
-user. The cost is a popup for every dangerous action, which is why it's off by default.
+| Removed | Why |
+|---|---|
+| `--i-have-user-consent` | The model added this flag itself. It could therefore "get consent" without ever asking the user |
+| `tier_refuse` (hard refusal on payments) | Refusing outright takes away the user's right to decide. It now asks instead |
+| `approval.require_user_code` config key | It was optional and defaulted to off. It is now unconditional and not configurable |
+| Any "fully autonomous" / "full access" setting | There is none. The decision belongs to the user, so there is nothing to switch off |
+
+### What this does and does not stop
+
+- Against T1 (misjudgement): ✅ the model has to come back to the user every time
+- Against T2 (prompt injection): ✅ an injected model cannot produce the code by itself
+- **Not** a substitute for the user actually reading the dialog. If the user hands over a
+  code without looking at what is being confirmed, the gate does nothing.
 
 ---
 
@@ -85,7 +99,7 @@ from logged-in accounts, the blast radius is larger.
 
 1. **Code-level blocks** — whitelist, payment refusal, password refusal. The model cannot
    change these.
-2. **The approval gate** — with `require_user_code` on, a human has to participate.
+2. **The consent dialog** — a human has to read a number off a dialog and hand it over.
 3. **Prompt conventions** — page content is wrapped in `<untrusted-page-content>` and the
    skill instructs the model to treat it as data. **This is a prompt, not an enforcement
    mechanism.** It is the outermost layer of defense-in-depth, not a guarantee.
@@ -140,13 +154,15 @@ risk is the user's. Don't experiment with a primary account.
 
 | You want | Change |
 |---|---|
-| Safer (dangerous actions require a human) | `approval.require_user_code: true` |
-| Safer (even sending a message needs consent) | Add terms to `approval.tier_confirm` |
-| Safer (allow only specific sites) | `whitelist.domain_allowlist_enabled: true` + fill `domain_allowlist` |
-| More convenient (fewer prompts) | Leave the defaults; use `Ctrl+Alt+F9` to arm only when needed |
+| Ask about *more* things | Add terms to `approval.danger_words` |
+| Allow only specific sites | `whitelist.domain_allowlist_enabled: true` + fill `domain_allowlist` |
+| Fewer popups | Nothing to switch off — the gate is not configurable. Use `Ctrl+Alt+F9` to arm only when needed |
 | Stop everything right now | `Ctrl+Alt+Q`, or `python scripts/ctl.py panic` |
 
 Changes to `config.json` take effect immediately — no daemon restart needed.
+
+**There is no setting that makes dangerous actions automatic.** That is the point. If you
+find yourself wanting one, what you actually want is a narrower task.
 
 ---
 

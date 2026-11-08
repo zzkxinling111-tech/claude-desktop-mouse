@@ -118,7 +118,45 @@ See `humanize.drag()`.
 
 ---
 
-## 9. `GetLastInputInfo` gets polluted by your own input
+## 9. UIA says "on screen", but the pixel belongs to another window
+
+**Symptom:** a drag or click that the skill reports as successful does nothing. Or, worse,
+it hits the taskbar. Nothing in the browser changes.
+
+**Cause:** UIA's `CurrentIsOffscreen` only means "outside the page's scroll viewport". It
+says nothing about whether that pixel is *clickable*. A taskbar, an always-on-top widget, or
+a fullscreen game sitting over the browser still leaves the element marked as on-screen —
+but the mouse event goes to whatever is actually on top.
+
+Observed during development: the bottom of the page sat under the Windows taskbar. The drop
+slot's centre was at y≈1554 on a 1600 px-tall screen — inside the taskbar. UIA reported it
+as visible, the cursor went exactly there, the release went to the taskbar, and the page
+received nothing.
+
+**Fix:** `winput.point_over_window()` hit-tests with `WindowFromPoint` +
+`GetAncestor(GA_ROOT)` and compares against the target window. `observe.hittable_point()`
+tries the centre first, then quarter-points, and reports the element as unreachable if every
+candidate is covered. `find_elements()` drops unreachable elements; `find` and
+`resolve_by_text` say *"found, but it's covered"* instead of *"not found"*.
+
+---
+
+## 10. The drag target is still animating
+
+**Symptom:** the servo reports success, the drag lands somewhere else.
+
+**Cause:** reflow is usually animated. A CSS `transition` keeps moving the element for
+another 100–200 ms after the layout change. A single "is it inside the rect?" check passes
+mid-animation, and the element then slides out from under the cursor before the button is
+released.
+
+**Fix:** `humanize.drag_servo()` requires the target rect to stay within 2 px across three
+samples 80 ms apart, and re-checks once more after a final pause before releasing. If the
+page is still moving, it keeps following instead of dropping early.
+
+---
+
+## 11. `GetLastInputInfo` gets polluted by your own input
 
 **Symptom:** the "user is actively using the computer" check fails permanently from step two
 onward.
@@ -130,7 +168,7 @@ arm switch — an explicit statement of intent by the user, rather than a guess.
 
 ---
 
-## 10. Non-ASCII text turns to mojibake on the console
+## 12. Non-ASCII text turns to mojibake on the console
 
 **Symptom:** Chinese element names print as `����`.
 
@@ -141,7 +179,7 @@ See the head of `ctl.py`.
 
 ---
 
-## 11. A global hotkey is already taken
+## 13. A global hotkey is already taken
 
 **Symptom:** `guardd.py` fails to start with error 1409.
 
@@ -153,7 +191,7 @@ restart the daemon.
 
 ---
 
-## 12. The user and the script fight over the mouse
+## 14. The user and the script fight over the mouse
 
 **Symptom:** clicks miss, or the cursor gets yanked away mid-action.
 
@@ -168,7 +206,7 @@ restart the daemon.
 
 ---
 
-## 13. Screenshots capture whatever is on top
+## 15. Screenshots capture whatever is on top
 
 **Symptom:** the screenshot contains another window covering the browser.
 
@@ -180,7 +218,7 @@ regions show the occluding window.
 
 ---
 
-## 14. The page changes between two steps
+## 16. The page changes between two steps
 
 **Symptom:** you fill half a form, then discover a hundred typed characters went into a
 completely different page.

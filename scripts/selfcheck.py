@@ -8,7 +8,15 @@
 from __future__ import annotations
 
 import random
+import sys
 import time
+
+# Windows 控制台默认 GBK，不强制 UTF-8 的话中文和 ✓ 都会炸
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import winput
 
@@ -84,12 +92,34 @@ def main() -> int:
         print(f"  已允许占用  : {guard.is_armed()}")
         print(f"  急停标志    : {guard.stop_requested()}")
         print(f"  用户空闲    : {winput.user_idle_seconds():.2f} s")
-        for probe, expect in (("登录", "ok"), ("删除", "confirm"), ("立即支付", "refuse")):
+        for probe, expect in (("登录", "ok"), ("it", "ok"),
+                              ("删除", "ask"), ("立即支付", "ask"),
+                              ("Delete repository", "ask")):
             tier = guard.check_approval(probe)["tier"]
             mark = "✓" if tier == expect else "✗"
-            print(f"  {mark} 审批 `{probe}` -> {tier}（应为 {expect}）")
+            print(f"  {mark} 危险词判定 `{probe}` -> {tier}（应为 {expect}）")
             if tier != expect:
                 problems.append(f"审批门异常：`{probe}` 判定为 {tier}，应为 {expect}。")
+
+        # 授权必须是"确认码说了算"。只靠模型自己加参数不能放行。
+        # 这里只做结构检查，不真的弹窗 —— 自检不该打断用户。
+        import inspect
+
+        params = list(inspect.signature(guard.assert_approved).parameters)
+        if "user_consent" in params:
+            problems.append(
+                "assert_approved 仍然接受模型自报的同意参数 —— 审批门形同虚设。"
+            )
+        else:
+            print(f"  ✓ 审批接口只认确认码（参数：{'、'.join(params)}）")
+
+        approval_cfg = guard.load_config()["approval"]
+        if "require_user_code" in approval_cfg or "level" in approval_cfg:
+            problems.append(
+                "配置里仍有可以放宽危险操作确认的开关 —— 那个开关不该存在。"
+            )
+        else:
+            print("  ✓ 危险操作确认没有关闭开关")
     except ImportError:
         print("  guard.py 尚未就绪，跳过。")
 

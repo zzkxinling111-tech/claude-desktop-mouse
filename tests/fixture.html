@@ -19,6 +19,21 @@
   .tall { height: 1500px;
           background: linear-gradient(#fff, #dfe6f5); margin-top: 30px; }
   #bottom { padding: 20px 0 60px; }
+
+  /* —— 拖拽区 —— */
+  #builder { display: flex; gap: 26px; align-items: flex-start;
+             padding: 14px; border: 1px dashed #aab; border-radius: 8px;
+             transition: width .15s; width: 640px; }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+  .chip { padding: 9px 18px; border: 1px solid #889; border-radius: 6px;
+          background: #fff8e6; cursor: grab; font-size: 15px; user-select: none; }
+  .chip.dragging { position: fixed; pointer-events: none; z-index: 9999;
+                   margin: 0; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  .slot { min-width: 130px; min-height: 40px; padding: 9px 14px;
+          border: 2px dashed #99a; border-radius: 6px; background: #f7f9ff;
+          display: flex; align-items: center; gap: 6px; font-size: 15px; }
+  .slot.over { border-color: #4a6cf7; background: #e8eeff; }
+  .slot.hit { border-style: solid; border-color: #2fa36b; background: #eafaf1; }
 </style>
 </head>
 <body>
@@ -41,6 +56,25 @@
 
 <div id="status">状态：等待操作…</div>
 
+<h2>四、拖拽（Build a Sentence）</h2>
+<p>把左边的词拖进右边的空格。钩上下面这一项，会在拖到一半时把版面压窄，
+模拟「拖拽过程中窗口变窄、词块位置全变了」的情况。</p>
+<label><input type="checkbox" id="reflow"> 拖拽途中自动重排（宽度减半）</label>
+
+<div id="builder">
+  <div class="col" id="chips">
+    <button class="chip" id="w1" type="button">it</button>
+    <button class="chip" id="w2" type="button">is</button>
+    <button class="chip" id="w3" type="button">hot</button>
+  </div>
+  <div class="col" id="slots">
+    <div class="slot" id="s1" role="button" tabindex="0">空格1</div>
+    <div class="slot" id="s2" role="button" tabindex="0">空格2</div>
+    <div class="slot" id="s3" role="button" tabindex="0">空格3</div>
+  </div>
+</div>
+<div id="drag-status">拖拽状态：等待</div>
+
 <div class="tall"></div>
 <h2 id="bottom">页面底部的锚点</h2>
 <p>如果你能看到这行字，说明滚动生效了。</p>
@@ -53,6 +87,62 @@
   }
   function log(message) { events.push(message); render(); }
   function note(message) { log(message); }
+
+  // —— 拖拽 ——
+  // 用真实的 mousedown / mousemove / mouseup，这样真实鼠标输入就能驱动它。
+  // 不用 HTML5 drag-and-drop，因为那套 DataTransfer 在合成输入下很难伺候。
+  let dragging = null;
+  let reflowed = false;
+  const dragStatus = document.getElementById('drag-status');
+
+  document.addEventListener('mousedown', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    e.preventDefault();
+    dragging = chip;
+    reflowed = false;
+    chip.classList.add('dragging');
+    chip.style.left = (e.clientX - 30) + 'px';
+    chip.style.top = (e.clientY - 16) + 'px';
+    dragStatus.textContent = '拖拽状态：开始拖动 ' + chip.textContent;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    dragging.style.left = (e.clientX - 30) + 'px';
+    dragging.style.top = (e.clientY - 16) + 'px';
+
+    // 在拖拽真正开始移动的那一下立刻压窄版面 —— 这时候光标正在路上，
+    // 目标还没到。这正是线上会失手的时刻：终点坐标已经算好了，但已经作废。
+    if (!reflowed && document.getElementById('reflow').checked) {
+      reflowed = true;
+      document.getElementById('builder').style.width = '320px';
+      log('页面重排了');
+      dragStatus.textContent = '拖拽状态：页面已重排';
+    }
+
+    const slot = e.target.closest('.slot');
+    document.querySelectorAll('.slot').forEach(s => s.classList.toggle('over', s === slot));
+  });
+
+  document.addEventListener('mouseup', (e) => {
+    if (!dragging) return;
+    const slot = e.target.closest('.slot');
+    document.querySelectorAll('.slot').forEach(s => s.classList.remove('over'));
+    dragging.classList.remove('dragging');
+    dragging.style.left = '';
+    dragging.style.top = '';
+
+    if (slot) {
+      slot.appendChild(dragging);
+      slot.classList.add('hit');
+      log('把 ' + dragging.textContent + ' 放进了 ' + slot.id);
+      dragStatus.textContent = '拖拽状态：把 ' + dragging.textContent + ' 放进了 ' + slot.id;
+    } else {
+      dragStatus.textContent = '拖拽状态：松手时不在任何空格上';
+    }
+    dragging = null;
+  });
 </script>
 
 </body>

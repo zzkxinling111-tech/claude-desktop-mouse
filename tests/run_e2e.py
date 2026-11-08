@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import sys
 import time
 from pathlib import Path
@@ -76,6 +77,26 @@ def warm_up(hwnd: int) -> int:
     return count
 
 
+def reset_page(hwnd: int, *, scroll: int = 0) -> None:
+    """刷新页面回到初始状态，并把视图滚回顶部。
+
+    两个坑都在这里：
+      - Chrome 刷新后会**恢复原来的滚动位置**，不回到顶部；不显式 ctrl+home，
+        页面顶部的元素就还在视口外面。
+      - 屏幕高 1600、任务栏占了底部一截，而拖拽区靠下：「空格2」的中心正好落在
+        任务栏上。UIA 说它在页面里，但那一点其实属于任务栏 —— 松手事件根本
+        到不了网页。所以拖拽前要 scroll 一下，把它抬到任务栏上面。
+    """
+    run("press", "--combo", "ctrl+shift+r", "--window", hwnd)
+    time.sleep(2.5)
+    warm_up(hwnd)
+    run("press", "--combo", "ctrl+home", "--window", hwnd)
+    time.sleep(0.6)
+    if scroll:
+        run("scroll", "--dy", scroll, "--window", hwnd)
+        time.sleep(0.6)
+
+
 def main() -> int:
     guard.install()
     guard.set_armed(True)
@@ -94,8 +115,7 @@ def main() -> int:
     print(f"  UIA 预热：{warm_up(hwnd)} 个有名字的元素")
 
     # 刷新一下，让页面回到初始状态（测试可以反复跑）
-    run("press", "--combo", "ctrl+r", "--window", hwnd)
-    time.sleep(2.5)
+    reset_page(hwnd)
     print(f"  刷新后预热：{warm_up(hwnd)} 个有名字的元素")
     time.sleep(0.8)
 
@@ -114,17 +134,57 @@ def main() -> int:
     check(code == 0, "点击命令返回成功", f"退出码 {code}")
     check("普通按钮被点击" in page_text(hwnd), "点击真的落到了网页上")
 
-    print("\n=== 3. 审批门拦截 ===")
-    code, out = run("click", "--text", "删除全部内容", "--window", hwnd)
-    time.sleep(0.8)
-    check(code == 2, "「删除」类操作返回退出码 2（需确认）", f"实际 {code}")
-    check("审批门失效" not in page_text(hwnd), "危险按钮确实没被点到")
-    check("需要用户确认" in out or "已向用户说明" in out, "给出了明确的确认指引")
+    print("\n=== 3. 危险操作：一律弹窗问用户 ===")
+    # 测试里不能真的弹系统对话框 —— 没人点，脚本会一直挂着。所以把弹窗
+    # 换成一个只做记录的桩。这里验证的是「代码有没有走到要问用户这一步」，
+    # 以及「没拿到正确确认码时，一个字都不许动」。
+    prompts: list[str] = []
+    real_prompt = guard.prompt_user_code
 
-    code, out = run("click", "--text", "立即支付", "--window", hwnd)
-    time.sleep(0.8)
-    check(code == 3, "「支付」类操作返回退出码 3（拒绝）", f"实际 {code}")
-    check("审批门失效" not in page_text(hwnd), "支付按钮确实没被点到")
+    def stub_prompt(name, **_kw):
+        prompts.append(name)
+        raise guard.NeedsConsent(f"（测试桩）已对 {name!r} 弹出确认框")
+
+    def seed_code(code: str) -> None:
+        guard.CONSENT_PATH.write_text(json.dumps({
+            "hash": guard._code_hash(code),
+            "target": "删除全部内容",
+            "expires": time.time() + 60,
+            "attempts": 3,
+        }), encoding="utf-8")
+
+    guard.prompt_user_code = stub_prompt
+    try:
+        code, out = run("click", "--text", "删除全部内容", "--window", hwnd)
+        time.sleep(0.6)
+        check(code == 2, "「删除」类操作要求用户确认（退出码 2）", f"实际 {code}")
+        check(bool(prompts), "确实弹出了确认框", f"弹了 {len(prompts)} 次")
+        check("审批门失效" not in page_text(hwnd), "危险按钮确实没被点到")
+
+        code, _ = run("click", "--text", "立即支付", "--window", hwnd)
+        time.sleep(0.6)
+        check(code == 2, "「支付」类操作同样是询问，不是直接拒绝", f"实际 {code}")
+        check("审批门失效" not in page_text(hwnd), "支付按钮确实没被点到")
+
+        seed_code("4271")
+        code, _ = run("click", "--text", "删除全部内容", "--consent-code", "0000",
+                      "--window", hwnd)
+        time.sleep(0.6)
+        check(code == 2, "确认码不对时不执行", f"实际 {code}")
+        check("审批门失效" not in page_text(hwnd), "用了错码也没碰到危险按钮")
+
+        seed_code("4271")
+        code, _ = run("click", "--text", "删除全部内容", "--consent-code", "4271",
+                      "--window", hwnd)
+        time.sleep(0.8)
+        check(code == 0, "正确的确认码放行", f"实际 {code}")
+        check("删除按钮被点击" in page_text(hwnd), "拿到用户授权后确实执行了")
+    finally:
+        guard.prompt_user_code = real_prompt
+        try:
+            guard.CONSENT_PATH.unlink()
+        except FileNotFoundError:
+            pass
 
     print("\n=== 4. 键盘输入 ===")
     code, _ = run("click", "--text", "普通输入框", "--window", hwnd)
@@ -146,18 +206,32 @@ def main() -> int:
     check("拦截失效" not in page_text(hwnd), "密码框确实没被输入")
 
     print("\n=== 6. 滚动 ===")
+    run("press", "--combo", "ctrl+home", "--window", hwnd)
+    time.sleep(0.6)
     code, _ = run("find", "--text", "页面底部的锚点", "--window", hwnd)
     visible_before = code == 0
 
-    code, _ = run("scroll", "--dy", 1500, "--window", hwnd)
-    time.sleep(1.4)
-    code2, _ = run("find", "--text", "页面底部的锚点", "--window", hwnd)
+    # 一次滚不够就再滚一次，直到看见锚点或滚到头。页面长度会随测试内容变化，
+    # 写死一个距离迟早会失效。
+    moved = False
+    code2 = 1
+    err = ""
+    for _ in range(6):
+        code, out = run("scroll", "--dy", 900, "--window", hwnd)
+        time.sleep(0.9)
+        if code != 0:
+            err = f"滚动失败（退出码 {code}）：{out.strip()[:200]}"
+            break
+        moved = True
+        code2, out2 = run("find", "--text", "页面底部的锚点", "--window", hwnd)
+        if code2 == 0:
+            break
+        err = out2.strip()[:200]
 
-    check(code == 0, "滚动命令返回成功", f"退出码 {code}")
-    if visible_before:
-        check(code2 == 0, "滚动后底部锚点可见")
-    else:
-        check(code2 == 0, "滚动前不可见 → 滚动后可见，滚动真的生效")
+    check(moved, "滚动命令返回成功", "" if moved else err)
+    check(code2 == 0, "滚动后底部锚点可见，滚动真的生效"
+                      + ("（滚动前已可见）" if visible_before else ""),
+          "" if code2 == 0 else err)
 
     print("\n=== 7. 截图 ===")
     code, _ = run("shot", "--window", hwnd, "--tag", "e2e")
@@ -172,6 +246,72 @@ def main() -> int:
         check(len(lines) > 0, f"日志有 {len(lines)} 条记录")
         dirty = [ln for ln in lines if "supersecret" in ln or "hello 世界" in ln]
         check(not dirty, "日志里没有出现任何输入文本内容")
+
+    print("\n=== 9. 闭环拖拽（drag-to）===")
+    reset_page(hwnd, scroll=260)
+
+    code, out = run("drag-to", "--from", "it", "--to", "空格1", "--window", hwnd)
+    time.sleep(0.6)
+    text = page_text(hwnd)
+    check(code == 0, "普通拖拽成功", f"退出码 {code}")
+    check("把 it 放进了 s1" in text, "词确实落进了第 1 个空格")
+    check(not winput.left_button_down(), "拖拽结束后鼠标按键已抬起")
+
+    # 打开「拖拽途中自动重排」，再拖一次 —— 这正是真实场景里失手的那种情况
+    reset_page(hwnd, scroll=260)  # 上一次拖进去的词会让 --from 匹配到格子本身，先清干净
+    code, _ = run("click", "--text", "拖拽途中自动重排", "--window", hwnd)
+    time.sleep(0.5)
+    code, out = run("drag-to", "--from", "is", "--to", "空格2", "--window", hwnd)
+    time.sleep(0.6)
+    text = page_text(hwnd)
+    check("页面重排了" in text, "拖拽途中页面确实重排了")
+    check(code == 0, "重排之后仍然拖拽成功", f"退出码 {code}")
+    check("把 is 放进了 s2" in text, "重排之后仍然落进了正确的空格")
+    check(not winput.left_button_down(), "重排场景下鼠标按键也已抬起")
+
+    reset_page(hwnd, scroll=260)
+    code, _ = run("drag-to", "--from", "hot", "--to", "不存在的空格", "--window", hwnd)
+    check(code == 4, "落点不存在时明确报错（退出码 4）", f"实际 {code}")
+    check(not winput.left_button_down(), "失败之后鼠标按键也是抬起的")
+
+    print("\n=== 10. 批量执行 ===")
+    reset_page(hwnd)
+
+    ok_steps = [
+        {"action": "click", "text": "普通按钮"},
+        {"action": "drag-to", "from": "it", "to": "空格1"},
+        {"action": "page-text"},
+    ]
+    ok_path = HERE / "steps-ok.json"
+    ok_path.write_text(json.dumps(ok_steps, ensure_ascii=False), encoding="utf-8")
+
+    code, out = run("batch", "--file", ok_path, "--window", hwnd)
+    time.sleep(0.6)
+    text = page_text(hwnd)
+    check(code == 0, "三步批量全部成功", f"退出码 {code}")
+    check("普通按钮被点击" in text and "把 it 放进了 s1" in text,
+          "批量里每一步都真的生效了，不是一个来回才做一步")
+    check("全部 3 步成功" in out, "给出了批量汇总")
+
+    bad_steps = [
+        {"action": "click", "text": "普通按钮"},
+        {"action": "click", "text": "这个元素根本不存在"},
+        {"action": "drag-to", "from": "hot", "to": "空格3"},
+    ]
+    bad_path = HERE / "steps-bad.json"
+    bad_path.write_text(json.dumps(bad_steps, ensure_ascii=False), encoding="utf-8")
+
+    code, out = run("batch", "--file", bad_path, "--window", hwnd)
+    time.sleep(0.4)
+    check(code == 4, "第二步找不到元素时整批停下（退出码 4）", f"实际 {code}")
+    check("停在第 2 步" in out, "明确报告停在哪一步")
+    check("把 hot 放进了 s3" not in page_text(hwnd), "失败之后没有继续跑第三步")
+
+    for p in (ok_path, bad_path):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
 
     print("\n" + "=" * 58)
     passed = sum(1 for ok, _, _ in results if ok)

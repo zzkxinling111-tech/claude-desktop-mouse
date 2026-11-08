@@ -167,6 +167,82 @@ def check_abort() -> None:
     if _abort_check is not None and _abort_check():
         release_all()
         raise Aborted("已收到急停信号，动作中止。")
+    check_geometry()
+
+
+# --------------------------------------------------------------------------
+# 窗口几何守卫
+# --------------------------------------------------------------------------
+#
+# 坐标是在动作开始时算出来的。窗口在动作中途被拖动、吸附成半屏、改尺寸或
+# 最小化，这些坐标当场作废，但动作本身不会因此停下 —— 它会拖/点到一个
+# 不存在的位置，然后照样返回成功。这个守卫让动作在几何变化的那一刻中止。
+
+class GeometryChanged(RuntimeError):
+    """动作执行期间目标窗口的几何变了，之前算好的坐标已经作废。"""
+
+
+_geo_hwnd = None
+_geo_base = None
+
+
+def client_rect_on_screen(hwnd: int) -> "tuple[int, int, int, int] | None":
+    """窗口客户区此刻在屏幕上的矩形。窗口不可用（关闭/最小化）时返回 None。
+
+    用客户区而不是窗口外框：UIA 报的是屏幕坐标，而元素只可能落在内容区，
+    客户区的屏幕矩形同时包含了「窗口位置」和「内容区大小」两个变化。
+    """
+    if not hwnd or not user32.IsWindow(hwnd) or user32.IsIconic(hwnd):
+        return None
+    rc = wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rc)):
+        return None
+    pt = wintypes.POINT(0, 0)
+    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+        return None
+    return (int(pt.x), int(pt.y),
+            int(pt.x) + int(rc.right - rc.left),
+            int(pt.y) + int(rc.bottom - rc.top))
+
+
+def watch_geometry(hwnd: int) -> None:
+    """开始盯这个窗口，把此刻的客户区矩形记成基线。动作开始前调用。"""
+    global _geo_hwnd, _geo_base
+    _geo_hwnd = int(hwnd)
+    _geo_base = client_rect_on_screen(_geo_hwnd)
+
+
+def unwatch_geometry() -> None:
+    global _geo_hwnd, _geo_base
+    _geo_hwnd = None
+    _geo_base = None
+
+
+def geometry_drift() -> "str | None":
+    """窗口相对基线变了没有。变了返回一句说明，没变返回 None。"""
+    if _geo_hwnd is None:
+        return None
+    now = client_rect_on_screen(_geo_hwnd)
+    if now is None:
+        return "目标窗口已消失（被关闭或最小化）"
+    if now != _geo_base:
+        return f"客户区 {_geo_base} → {now}"
+    return None
+
+
+def check_geometry() -> None:
+    """动作循环里的几何检查点。
+
+    宁可误中止，也不带着作废的坐标往下走：重做一次的代价远小于
+    在错误位置拖一下、还返回成功。
+    """
+    drift = geometry_drift()
+    if drift is None:
+        return
+    release_all()
+    raise GeometryChanged(
+        f"动作执行期间窗口几何变了：{drift}。算好的坐标已作废，动作已中止。"
+    )
 
 
 def release_all() -> None:
@@ -283,6 +359,18 @@ def double_click_time_ms() -> int:
     return int(user32.GetDoubleClickTime()) or 500
 
 
+VK_LBUTTON = 0x01
+
+
+def left_button_down() -> bool:
+    """鼠标左键此刻是不是被按住的。
+
+    用来在拖拽之后做一次收尾检查：任何路径下都不该把鼠标留在按下状态，
+    否则用户一碰鼠标就会拖出个奇怪的东西来。
+    """
+    return bool(user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000)
+
+
 # --------------------------------------------------------------------------
 # 键盘原语
 # --------------------------------------------------------------------------
@@ -368,6 +456,34 @@ def window_pid(hwnd: int) -> int:
 
 def is_window(hwnd: int) -> bool:
     return bool(user32.IsWindow(hwnd))
+
+
+GA_ROOT = 2
+
+user32.WindowFromPoint.argtypes = [wintypes.POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
+
+
+def window_at(x: int, y: int) -> int:
+    """屏幕坐标 (x, y) 这一点，实际属于哪个顶层窗口。
+
+    UIA 说的「可见」只表示元素在**页面**里、没被滚出去；它不表示那一点真的
+    能点到。任务栏、常驻置顶的悬浮窗、别的应用窗口都会盖在上面，那时候
+    鼠标事件根本到不了网页 —— 实测踩过：网页底部一半被任务栏盖住，
+    词块的中心点正好落在任务栏上，拖过去松手，网页什么也没收到。
+    """
+    pt = wintypes.POINT(int(x), int(y))
+    h = user32.WindowFromPoint(pt)
+    if not h:
+        return 0
+    return int(user32.GetAncestor(h, GA_ROOT) or h)
+
+
+def point_over_window(hwnd: int, x: int, y: int) -> bool:
+    """这一点是不是真的落在目标窗口上（而不是被别的东西盖住了）。"""
+    return window_at(x, y) == int(hwnd)
 
 
 def process_name(pid: int) -> str:

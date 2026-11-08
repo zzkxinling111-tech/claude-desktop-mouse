@@ -8,42 +8,43 @@
   },
 
   "approval": {
-    "_comment": "`balanced` profile. tier_refuse: refused outright, handed to the user. tier_confirm: Claude must obtain explicit user consent first.",
+    "_comment": "There is exactly one approval tier: ASK THE USER. Any element whose visible text matches `danger_words` triggers a system dialog carrying a one-time code. The code appears only in that dialog — the assistant has to get it from the user. Nothing here can be turned off, and there is deliberately no 'autonomous' or 'full access' setting: the decision belongs to the user, always.",
 
-    "_wordlist_comment": "The keyword lists are bilingual (Chinese + English) because UI text is localized. If you use a browser in another language, ADD THAT LANGUAGE'S TERMS — the gate only matches what is in these lists.",
+    "_wordlist_comment": "The keyword list is bilingual (Chinese + English) because UI text is localized. If you use a browser in another language, ADD THAT LANGUAGE'S TERMS — the gate only matches what is in these lists. Adding a word makes the skill ask you more often; it never makes it act on its own.",
 
-    "level": "balanced",
-
-    "tier_refuse": [
+    "danger_words": [
       "支付", "去支付", "立即支付", "确认支付", "付款", "结算", "买单",
       "购买", "立即购买", "加入购物车", "下单", "提交订单", "确认订单",
       "转账", "汇款", "提现", "充值", "打赏", "付费", "续费", "开通会员",
-      "pay", "payment", "buy now", "purchase", "checkout", "place order",
-      "transfer", "withdraw", "top up", "donate", "subscribe", "billing"
-    ],
-
-    "tier_confirm": [
       "删除", "移除", "清空", "永久删除", "注销", "关闭账户", "解绑", "解约",
       "退订", "取消订阅", "取消订单", "退款",
       "发送", "提交", "发布", "发帖", "投稿", "上传", "转发",
       "授权", "允许访问", "同意并", "确认授权",
       "卸载", "重置", "格式化", "恢复默认", "恢复出厂",
       "退出登录", "退出账号",
+      "pay", "payment", "buy now", "purchase", "checkout", "place order",
+      "transfer", "withdraw", "top up", "donate", "subscribe", "billing",
       "delete", "remove", "clear all", "uninstall", "reset", "format",
       "send", "submit", "post", "publish", "upload", "authorize", "grant",
       "revoke", "unsubscribe", "log out", "sign out", "revoke access"
     ],
 
-    "max_element_name_chars": 60,
-
-    "_require_user_code_note": "When enabled, any action hitting tier_confirm requires a one-time code that is shown ONLY in a system dialog — the user reads it and tells Claude. This means a prompt-injected model cannot complete a dangerous action on its own. The cost is a popup per dangerous action.",
-    "require_user_code": false
+    "max_element_name_chars": 60
   },
 
   "whitelist": {
-    "_comment": "Only these processes and window classes may be operated. Enforced in code, not by asking the model nicely.",
+    "_comment": "What the skill is allowed to operate. Enforced in code, not by asking the model nicely. Only browsers — this skill has no way to drive other applications, because non-Chromium apps do not report a usable UIA tree.",
     "browser_processes": ["chrome.exe", "msedge.exe"],
     "window_classes": ["Chrome_WidgetWin_1"],
+
+    "_blocked_comment": "Never operable, with no override. Checked before the browser whitelist, so even a mis-edited whitelist cannot reach these. A terminal is not a button — it is a way to run anything.",
+    "blocked_processes": [
+      "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe",
+      "windowsterminal.exe", "wt.exe", "bash.exe", "wsl.exe",
+      "regedit.exe", "regedt32.exe", "mmc.exe", "taskmgr.exe",
+      "diskpart.exe", "diskmgmt.exe", "format.com", "cipher.exe",
+      "bcdedit.exe", "msconfig.exe"
+    ],
 
     "domain_allowlist_enabled": false,
     "domain_allowlist": [],
