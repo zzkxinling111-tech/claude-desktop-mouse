@@ -104,9 +104,28 @@ def reset_page(hwnd: int, *, scroll: int = 0) -> None:
         time.sleep(0.6)
 
 
+def set_approval_mode(mode: str) -> None:
+    """测试要验证审批门本身，所以运行期间临时把它打开；结束后恢复。"""
+    cfg_path = guard.BASE / "config.json"
+    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    data["approval"]["mode"] = mode
+    cfg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + chr(10),
+                        encoding="utf-8")
+
+
 def main() -> int:
     guard.install()
     guard.set_armed(True)
+
+    cfg_path = guard.BASE / "config.json"
+    original_mode = json.loads(cfg_path.read_text(encoding="utf-8"))["approval"].get("mode", "ask")
+    if original_mode != "ask":
+        # atexit 而不是顺序执行：中途崩溃、Ctrl+C、断言失败都不会把用户的
+        # config 永久留在 "ask" 上。
+        import atexit
+        atexit.register(set_approval_mode, original_mode)
+        set_approval_mode("ask")
+        print(f"(approval.mode was {original_mode!r}; switched to 'ask' for this run)")
 
     print("=== Setup ===")
     win = find_fixture_window()
